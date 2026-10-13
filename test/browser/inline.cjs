@@ -28,7 +28,7 @@ const host = { bib: fs.readFileSync(FIX + 'refs.bib', 'utf8'), images: { signal:
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 (async () => {
-  const b = await p.launch({ executablePath: CHROME, headless: 'new' });
+  const b = await p.launch({ executablePath: CHROME, headless: 'new', args: process.env.CI ? ['--no-sandbox'] : [] });
   const pg = await b.newPage();
   const errs = [];
   pg.on('pageerror', (e) => errs.push(e.message));
@@ -171,6 +171,63 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sync();
   assert.ok(doc.includes('Standard; see \\cite{knuth1984} and more\n'), '7c typing after clicked citation: ' + JSON.stringify(doc.slice(doc.indexOf('Standard;'), doc.indexOf('Standard;') + 50)));
   await consistent('after clicking past citation');
+
+  // 7d. Citation completion: typing \citep{lapp open shows the bibliography entry.
+  await caretAfter('rely on 50% & more ');
+  await pg.keyboard.type('(see \\');
+  await pg.waitForSelector('.popover textarea');
+  await pg.keyboard.type('citep{lapp open');
+  await pg.waitForSelector('.complete .cmp.active');
+  const first = await pg.$eval('.complete .cmp.active b', (b) => b.textContent);
+  assert.equal(first, 'lapp2023opensoundscape', '7d top suggestion');
+  await pg.keyboard.press('Enter');
+  await sleep(50);
+  await pg.keyboard.type(') ');
+  await sync();
+  assert.ok(doc.includes('rely on 50\\% \\& more (see \\citep{lapp2023opensoundscape}) \\emph{attention}'), '7d cite inserted: ' + JSON.stringify(doc.slice(doc.indexOf('rely on'), doc.indexOf('rely on') + 80)));
+  await consistent('after cite completion');
+
+  // 7e. Toolbar Cite: Tab adds a second key; typing continues afterwards (focus kept).
+  await caretAfter('are numbered automatically with ');
+  await pg.click('button[data-action="cite"]');
+  await pg.waitForSelector('.popover textarea');
+  await pg.keyboard.type('einstein');
+  await pg.waitForSelector('.complete .cmp.active');
+  await pg.keyboard.press('Tab');
+  await pg.keyboard.type('texbook');
+  await sleep(30);
+  await pg.keyboard.press('Enter');
+  await sleep(50);
+  await pg.keyboard.type('and ');
+  await sync();
+  assert.ok(doc.includes('automatically with \\cite{einstein1905, knuth1984}and $x^2$'), '7e toolbar cite: ' + JSON.stringify(doc.slice(doc.indexOf('automatically with'), doc.indexOf('automatically with') + 60)));
+
+  // 7f. Toolbar Ref after a word: tied with ~, equations become \eqref, and typing continues.
+  await caretAfter('The gradient update is given by');
+  await pg.click('button[data-action="ref"]');
+  await pg.waitForSelector('.popover textarea');
+  await pg.keyboard.type('loss');
+  await pg.waitForSelector('.complete .cmp.active');
+  await pg.keyboard.press('Enter');
+  await sleep(50);
+  await pg.keyboard.type(' again');
+  await sync();
+  assert.ok(doc.includes('The gradient update is given by~\\eqref{eq:loss} again'), '7f toolbar ref: ' + JSON.stringify(doc.slice(doc.indexOf('The gradient update'), doc.indexOf('The gradient update') + 60)));
+  await consistent('after ref completion');
+
+  // 7g. Completion inside the block source editor.
+  await pg.evaluate(() => { const p = [...document.querySelectorAll('.blk-paragraph')].find((b) => b.textContent.includes('A brand new paragraph')); p.dispatchEvent(new MouseEvent('mousemove', { bubbles: true })); });
+  await pg.click('#gutter');
+  await pg.waitForSelector('.editor textarea');
+  await pg.evaluate(() => { const t = document.querySelector('.editor textarea'); t.setSelectionRange(t.value.length, t.value.length); });
+  await pg.keyboard.type(' \\citet{companion');
+  await pg.waitForSelector('.complete .cmp.active');
+  await pg.keyboard.press('Enter');
+  const edited = await pg.$eval('.editor textarea', (t) => t.value);
+  assert.ok(edited.endsWith('\\citet{goossens1994}'), '7g source editor completion: ' + edited.slice(-40));
+  await pg.keyboard.press('Escape');
+  await sync();
+  await consistent('after source editor completion');
 
   // 8. Headings, captions and table cells are editable.
   await caretAfter('Introduction', '.ed[data-region="h"] .r');

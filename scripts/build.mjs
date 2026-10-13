@@ -16,12 +16,20 @@ mkdirSync('dist/media/pdfjs', { recursive: true });
 cpSync('node_modules/pdfjs-dist/build/pdf.min.js', 'dist/media/pdfjs/pdf.min.js');
 cpSync('node_modules/pdfjs-dist/build/pdf.worker.min.js', 'dist/media/pdfjs/pdf.worker.min.js');
 
-const common = { bundle: true, minify: production, sourcemap: !production, logLevel: 'info' };
+const common = {
+  bundle: true,
+  minify: production,
+  sourcemap: !production,
+  logLevel: 'info',
+  // Test hooks (used by the integration suite) are compiled out of published builds.
+  define: { __TEST_HOOKS__: String(!production) },
+};
 const builds = [
   { ...common, entryPoints: ['src/extension.ts'], outfile: 'dist/extension.js', platform: 'node', format: 'cjs', external: ['vscode'], target: 'node18' },
   { ...common, entryPoints: ['src/webview/main.ts'], outfile: 'dist/webview.js', platform: 'browser', format: 'iife', target: 'chrome110' },
-  { ...common, entryPoints: ['src/latex/index.ts'], outfile: 'dist/latex.cjs', platform: 'node', format: 'cjs', target: 'node18' },
 ];
+// Node build of the LaTeX core, used only by the unit and browser tests.
+if (!production) builds.push({ ...common, entryPoints: ['src/latex/index.ts'], outfile: 'dist/latex.cjs', platform: 'node', format: 'cjs', target: 'node18' });
 if (watch) {
   for (const b of builds) await (await esbuild.context(b)).watch();
 } else {

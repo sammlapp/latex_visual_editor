@@ -26,7 +26,7 @@ exports.run = async function () {
     }
   };
 
-  const ext = vscode.extensions.all.find((e) => e.packageJSON.name === 'latex-visual-editor');
+  const ext = vscode.extensions.all.find((e) => e.packageJSON.name === 'swan-latex-visual-editor');
   const { provider } = await ext.activate();
   const ws = vscode.workspace.workspaceFolders[0].uri;
   const uri = vscode.Uri.joinPath(ws, 'paper.tex');
@@ -91,9 +91,11 @@ exports.run = async function () {
 
   await check('undo from the visual editor reverts typing', async () => {
     const before = doc.getText();
+    await vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
     await vscode.commands.executeCommand('undo');
     await until(() => doc.getText() !== before, 'undo applied');
     assert.ok(!doc.getText().includes('theory 100\\%'), 'typing undone');
+    await vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
     await vscode.commands.executeCommand('redo');
     await until(() => doc.getText().includes('theory 100\\%'), 'redo applied');
   });
@@ -116,6 +118,7 @@ exports.run = async function () {
   });
 
   await check('undo goes through the normal document history', async () => {
+    await vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
     await vscode.commands.executeCommand('undo');
     await until(() => doc.getText().includes('\\subsection{Results}'), 'undo applied');
   });

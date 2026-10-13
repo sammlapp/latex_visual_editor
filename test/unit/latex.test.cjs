@@ -159,3 +159,42 @@ test('editable regions cover paragraphs, headings, captions, cells and the title
   assert.match(html, /class="blk blk-figure"[^>]*contenteditable="false"/);
   assert.match(html, /class="isl math" contenteditable="false"/);
 });
+
+test('citation completion matches whole words across key, authors and title', () => {
+  const items = L.citationItems(ctx);
+  const keys = (q) => L.filterCompletions(items, q).map((i) => i.key);
+  assert.equal(keys('lapp opensoundscape')[0], 'lapp2023opensoundscape');
+  assert.equal(keys('opensoundscape lapp')[0], 'lapp2023opensoundscape');
+  assert.equal(keys('kitzes')[0], 'kitzes2018'); // first author ranks above a co-author
+  assert.ok(keys('kitzes').includes('lapp2023opensoundscape'));
+  assert.deepEqual(keys('einstein elektrodynamik'), ['einstein1905']);
+  assert.deepEqual(keys('erdos'), ['erdos1947'], 'accents ignored');
+  assert.deepEqual(keys('knuth1984'), ['knuth1984'], 'exact key');
+  assert.deepEqual(keys('attention need'), ['vaswani2017']);
+  assert.deepEqual(keys('2017'), ['vaswani2017'], 'year');
+  // Whole-word matching: scattered letters do not match.
+  assert.deepEqual(keys('lpp'), []);
+  assert.deepEqual(keys('lapp nonsense'), []);
+  // Empty query lists cited entries first, in citation order.
+  assert.deepEqual(L.filterCompletions(items, '').slice(0, 3).map((i) => i.key), ['einstein1905', 'knuth1984', 'vaswani2017']);
+  assert.ok(L.filterCompletions(items, '', 5).length === 5);
+});
+
+test('completion context detects the key being typed', () => {
+  const at = (s) => L.completionAt(s, s.indexOf('|') === -1 ? s.length : s.indexOf('|'));
+  let c = L.completionAt('see \\citep{lapp op', 18);
+  assert.equal(c.kind, 'cite');
+  assert.equal(c.command, 'citep');
+  assert.equal(c.query, 'lapp op');
+  c = L.completionAt('\\citet[p.~3]{knuth1984, vas', 27);
+  assert.equal(c.query, 'vas');
+  assert.equal(c.from, 24);
+  c = L.completionAt('\\cite{kn}', 8);
+  assert.equal(c.to, 8);
+  assert.equal(L.completionAt('\\eqref{eq:', 10).kind, 'ref');
+  assert.equal(L.completionAt('\\cite{done} more', 16), null);
+  assert.equal(L.completionAt('plain text {', 12), null);
+  assert.ok(at);
+  const labels = L.filterCompletions(L.labelItems(ctx), 'fig pair').map((i) => i.key);
+  assert.deepEqual(labels.slice(0, 2).sort(), ['fig:pair', 'fig:pair-a']);
+});

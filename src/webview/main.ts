@@ -10,7 +10,7 @@
 import { Ctx, HostResources, buildContext } from '../latex/context';
 import { renderBlock, renderDocument, renderInline, renderRange, scanRun, stripTags } from '../latex/render';
 import { Block } from '../latex/parser';
-import { splitAuthors } from '../latex/bib';
+import { CompletionContext, CompletionItem, citationItems, completionAt, filterCompletions, labelItems } from '../latex/complete';
 
 interface VsCodeApi {
   postMessage(msg: unknown): void;
@@ -19,6 +19,8 @@ interface VsCodeApi {
 }
 declare const acquireVsCodeApi: () => VsCodeApi;
 declare const pdfjsLib: any;
+/** Set by the build: true for development/test builds, false for published packages. */
+declare const __TEST_HOOKS__: boolean;
 
 interface Change {
   offset: number;
@@ -40,6 +42,8 @@ interface SourceEditor {
   sendTimer?: number;
   previewTimer?: number;
   parentStart?: number;
+  /** Removes the completion dropdown. */
+  cleanup?: () => void;
 }
 
 const vscode = acquireVsCodeApi();
@@ -124,7 +128,7 @@ window.addEventListener('message', (ev) => {
       insertBlock(msg.text, msg.at);
       break;
     case '__test':
-      void runTest(msg);
+      if (__TEST_HOOKS__) void runTest(msg);
       break;
   }
 });
@@ -572,9 +576,12 @@ function replaceRange(r: AbstractRange, ins: string): boolean {
  */
 function applyEdit(a: number, b: number, ins: string, caret: number, regionEl: HTMLElement | null) {
   const blkEl = regionEl?.closest<HTMLElement>('.blk') ?? null;
+  const before = ctx ? numberingSignature(ctx) : '';
   localEdit(a, b, ins);
   ctx = buildContext(text, host);
-  if (blkEl && !blkEl.classList.contains('phantom')) {
+  // Citations, labels or footnotes changing affects other blocks (numbers, reference list).
+  const renumbered = numberingSignature(ctx) !== before;
+  if (blkEl && !blkEl.classList.contains('phantom') && !renumbered) {
     const oldStart = Number(blkEl.dataset.start);
     const oldEnd = Number(blkEl.dataset.end);
     const delta = ins.length - (b - a);
@@ -596,6 +603,13 @@ function applyEdit(a: number, b: number, ins: string, caret: number, regionEl: H
     }
   }
   renderAll(caret);
+}
+
+/** Everything cross-block numbering depends on; if it changes, the whole document is re-rendered. */
+function numberingSignature(c: Ctx): string {
+  const labels = [...c.labels.entries()].map(([k, l]) => `${k}=${l.num}`).join(',');
+  const footnotes = (c.text.match(/\\(footnote|thanks)\b/g) ?? []).length;
+  return `${c.citeOrder.join(',')}|${labels}|${footnotes}|${c.headings.length}`;
 }
 
 function findBlockByStart(c: Ctx, start: number, kind: string): Block | undefined {
@@ -882,6 +896,9 @@ function openInsertPopover(r: AbstractRange, initial: string, caretIdx: number) 
   const ta = box.querySelector('textarea')!;
   const preview = box.querySelector<HTMLElement>('.popover-preview')!;
   ta.value = initial;
+  const detach = attachCompletion(ta, (mode) => {
+    if (mode === 'enter') finish(true);
+  });
   const draw = () => {
     preview.innerHTML = ta.value.trim() ? renderInline(ta.value, ctx!) : '';
     ta.style.height = 'auto';
@@ -892,8 +909,11 @@ function openInsertPopover(r: AbstractRange, initial: string, caretIdx: number) 
     if (done) return;
     done = true;
     box.remove();
-    const v = ta.value;
-    if (commit && v.trim() && v !== '$$' && v !== '\\') applyEdit(m.a, m.b, v, m.a + v.length, reg);
+    detach();
+    let v = ta.value;
+    // Tie a citation or reference to the preceding word, as is conventional.
+    if (/^\\(cite|citep|ref|eqref|cref|autoref)\b/.test(v) && m.a === m.b && /[A-Za-z0-9.,;:)]/.test(text[m.a - 1] ?? '')) v = '~' + v;
+    if (commit && v.trim() && v !== '$$' && v !== '\\' && !/^~?\\(cite\w*|ref|eqref)\{\}?$/.test(v)) applyEdit(m.a, m.b, v, m.a + v.length, reg);
     else setCaret(m.b);
   };
   ta.addEventListener('input', draw);
@@ -1133,6 +1153,7 @@ function openEditor(el: HTMLElement) {
     preview,
     parentStart: parentEl ? Number(parentEl.dataset.start) : undefined,
   };
+  sourceEd.cleanup = attachCompletion(ta);
   autosize(ta);
   updatePreview(true);
   ta.focus();
@@ -1243,6 +1264,7 @@ function closeEditor(send = true) {
   if (!sourceEd) return;
   if (send) flushSend();
   clearTimeout(sourceEd.previewTimer);
+  sourceEd.cleanup?.();
   const { start, hostLen } = sourceEd;
   sourceEd = null;
   selected = { start, end: start + hostLen };
@@ -1322,7 +1344,7 @@ function buildToolbar(): HTMLElement {
     </span>
     <span class="spacer"></span>
     <span class="tb-group">
-      <button data-action="paper" title="Toggle paper / theme colours">◐ Paper</button>
+      <button data-action="paper" title="Toggle paper / theme colors">◐ Paper</button>
       <button data-action="source" title="Open the LaTeX source to the side">{ } Source</button>
     </span>`;
   bar.addEventListener('mousedown', (e) => {
@@ -1367,10 +1389,10 @@ function buildToolbar(): HTMLElement {
         break;
       }
       case 'ref':
-        insertWithPicker(btn, refItems(), (key, item) => (item.kind === 'equation' ? `\\eqref{${key}}` : `\\ref{${key}}`));
+        startKeyCompletion('\\ref{');
         break;
       case 'cite':
-        insertWithPicker(btn, citeItems(), (key) => `\\cite{${key}}`);
+        startKeyCompletion('\\cite{');
         break;
       case 'paper':
         applyPaperMode(!document.body.classList.contains('paper'));
@@ -1383,34 +1405,16 @@ function buildToolbar(): HTMLElement {
   return bar;
 }
 
-/** Shows a picker and inserts the chosen item at the caret (inline) or into the source editor. */
-function insertWithPicker(anchor: HTMLElement, items: PickItem[], make: (key: string, item: PickItem) => string) {
+/** Starts a \\cite{ or \\ref{ at the caret (inline or in the source editor) with key completion open. */
+function startKeyCompletion(open: string) {
   if (sourceEd) {
-    const ta = sourceEd.ta;
-    const sel = [ta.selectionStart, ta.selectionEnd];
-    showPicker(anchor, items, (key, item) => {
-      ta.focus();
-      ta.setSelectionRange(sel[0], sel[1]);
-      insertAtCursor(ta, make(key, item));
-    });
+    sourceEd.ta.focus();
+    insertAtCursor(sourceEd.ta, open);
     return;
   }
   const sel = window.getSelection();
-  if (!sel?.rangeCount) return;
-  const saved = sel.getRangeAt(0).cloneRange();
-  const m = mapRange(saved);
-  if (!m || m.regA !== m.regB) return;
-  showPicker(anchor, items, (key, item) => {
-    let ins = make(key, item);
-    // Tie the reference to the preceding word, as is conventional.
-    if (m.a === m.b && /[A-Za-z0-9.,;:)]/.test(text[m.a - 1] ?? '')) ins = '~' + ins;
-    if (root.contains(m.regA)) applyEdit(m.a, m.b, ins, m.a + ins.length, m.regA);
-  }, () => {
-    root.focus({ preventScroll: true });
-    const s = window.getSelection()!;
-    s.removeAllRanges();
-    s.addRange(saved);
-  });
+  if (!sel?.rangeCount || !regionOf(sel.focusNode)) return;
+  openInsertPopover(sel.getRangeAt(0), open, open.length);
 }
 
 function applyPaperMode(on: boolean) {
@@ -1426,105 +1430,149 @@ function updateToolbarState() {
 }
 updateToolbarState();
 
-interface PickItem {
-  key: string;
-  label: string;
-  detail: string;
-  kind?: string;
-}
-
-function refItems(): PickItem[] {
-  const c = buildContext(localText(), host);
-  const kindName: Record<string, string> = { equation: 'Eq.', figure: 'Figure', table: 'Table', section: 'Section', theorem: 'Theorem', item: 'Item', other: '' };
-  return [...c.labels.entries()].map(([key, l]) => ({ key, label: key, detail: `${kindName[l.kind] ?? ''} ${l.num}`.trim(), kind: l.kind }));
-}
-
-function citeItems(): PickItem[] {
-  const c = buildContext(localText(), host);
-  const items: PickItem[] = [...c.bib.values()].map((e) => ({
-    key: e.key,
-    label: e.key,
-    detail: `${splitAuthors(e.fields.author ?? '').map((a) => a.split(' ').pop()).join(', ')}${e.fields.year ? ` (${e.fields.year})` : ''} — ${(e.fields.title ?? '').replace(/[{}]/g, '')}`,
-  }));
-  for (const [key, r] of c.bibitemText) {
-    if (!c.bib.has(key)) items.push({ key, label: key, detail: stripTags(c.text.slice(r.start, r.end)).slice(0, 80) });
-  }
-  return items;
-}
-
-function showPicker(anchor: HTMLElement, items: PickItem[], onPick: (key: string, item: PickItem) => void, onCancel?: () => void) {
-  document.querySelector('.picker')?.remove();
-  const box = document.createElement('div');
-  box.className = 'picker';
-  box.innerHTML = `<input placeholder="Filter…"><div class="picker-list"></div>`;
-  const input = box.querySelector('input')!;
-  const list = box.querySelector<HTMLElement>('.picker-list')!;
-  let active = 0;
-  let shown: PickItem[] = [];
-  let closed = false;
-  const draw = () => {
-    const q = input.value.toLowerCase();
-    shown = items.filter((i) => (i.label + ' ' + i.detail).toLowerCase().includes(q)).slice(0, 50);
-    active = Math.min(active, Math.max(0, shown.length - 1));
-    list.innerHTML = shown.length
-      ? shown.map((i, k) => `<div class="pick${k === active ? ' active' : ''}" data-k="${k}"><b>${esc(i.label)}</b> <span>${esc(i.detail)}</span></div>`).join('')
-      : `<div class="pick empty">${items.length ? 'No matches' : 'Nothing to insert yet'}</div>`;
-  };
-  const close = () => {
-    closed = true;
-    box.remove();
-  };
-  const choose = (k: number) => {
-    const item = shown[k];
-    close();
-    if (item) onPick(item.key, item);
-    else onCancel?.();
-  };
-  input.addEventListener('input', () => {
-    active = 0;
-    draw();
-  });
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowDown') active = Math.min(active + 1, shown.length - 1);
-    else if (e.key === 'ArrowUp') active = Math.max(active - 1, 0);
-    else if (e.key === 'Enter') {
-      // Prevent the Enter from reaching the editor once focus moves back.
-      e.preventDefault();
-      return choose(active);
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      close();
-      onCancel?.();
-      return;
-    } else return;
-    e.preventDefault();
-    draw();
-  });
-  list.addEventListener('mousedown', (e) => {
-    const p = (e.target as HTMLElement).closest<HTMLElement>('.pick[data-k]');
-    if (p) {
-      e.preventDefault();
-      choose(Number(p.dataset.k));
-    }
-  });
-  input.addEventListener('blur', () =>
-    setTimeout(() => {
-      if (!closed) {
-        close();
-        onCancel?.();
-      }
-    }, 150),
-  );
-  const r = anchor.getBoundingClientRect();
-  box.style.left = `${r.left}px`;
-  box.style.top = `${r.bottom + 4}px`;
-  document.body.appendChild(box);
-  draw();
-  input.focus();
-}
-
 function esc(s: string) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ---------------------------------------------------------------------------
+// Key completion for \cite{…} and \ref{…} in any LaTeX textarea
+
+/** Screen position just below the caret of a textarea (via a mirror element). */
+function caretCoords(ta: HTMLTextAreaElement): { left: number; top: number } {
+  const cs = getComputedStyle(ta);
+  const div = document.createElement('div');
+  for (const p of ['boxSizing', 'width', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth', 'paddingTop', 'paddingRight',
+    'paddingBottom', 'paddingLeft', 'fontStyle', 'fontVariant', 'fontWeight', 'fontSize', 'lineHeight', 'fontFamily', 'letterSpacing', 'wordSpacing', 'tabSize'] as const) {
+    (div.style as any)[p] = (cs as any)[p];
+  }
+  Object.assign(div.style, { position: 'absolute', visibility: 'hidden', whiteSpace: 'pre-wrap', overflowWrap: 'break-word', top: '0', left: '0' });
+  div.textContent = ta.value.slice(0, ta.selectionStart);
+  const span = document.createElement('span');
+  span.textContent = ta.value.slice(ta.selectionStart) || '.';
+  div.appendChild(span);
+  document.body.appendChild(div);
+  const r = ta.getBoundingClientRect();
+  const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.4;
+  const pos = { left: r.left + span.offsetLeft - ta.scrollLeft, top: r.top + span.offsetTop - ta.scrollTop + lh };
+  div.remove();
+  return pos;
+}
+
+/**
+ * Shows bibliography entries while a citation key is being typed (and labels
+ * for \ref-like commands). ↑/↓ choose, Enter inserts the key and closes the
+ * brace, Tab inserts it followed by ", " for another key, Esc dismisses.
+ */
+function attachCompletion(ta: HTMLTextAreaElement, onAccept?: (mode: 'enter' | 'tab') => void): () => void {
+  const list = document.createElement('div');
+  list.className = 'complete';
+  list.style.display = 'none';
+  document.body.appendChild(list);
+  let items: CompletionItem[] = [];
+  let active = 0;
+  let cc: CompletionContext | null = null;
+  let dismissedAt = -1;
+
+  const hide = () => {
+    list.style.display = 'none';
+    cc = null;
+  };
+  const draw = () => {
+    if (!cc) return;
+    const hint = cc.kind === 'cite' ? '↵ insert · Tab add another · Esc close' : '↵ insert · Esc close';
+    list.innerHTML = items.length
+      ? items
+          .map(
+            (it, k) =>
+              `<div class="cmp${k === active ? ' active' : ''}" data-k="${k}"><div class="cmp-main"><b>${esc(it.key)}</b> <span>${esc(it.detail)}</span></div>${
+                it.info ? `<div class="cmp-info">${esc(it.info)}</div>` : ''
+              }</div>`,
+          )
+          .join('') + `<div class="cmp-hint">${hint}</div>`
+      : `<div class="cmp empty">${cc.kind === 'cite' ? (ctx?.bib.size || ctx?.bibitemText.size ? 'No matching bibliography entries' : 'No bibliography found (\\bibliography{…} or \\addbibresource{…})') : 'No matching labels'}</div>`;
+    list.querySelector('.cmp.active')?.scrollIntoView({ block: 'nearest' });
+  };
+  const update = () => {
+    const caret = ta.selectionStart;
+    cc = ta.selectionStart === ta.selectionEnd ? completionAt(ta.value, caret) : null;
+    if (!cc || dismissedAt === cc.from) {
+      if (!cc) dismissedAt = -1;
+      return hide();
+    }
+    const c = ctx ?? buildContext(text, host);
+    items = filterCompletions(cc.kind === 'cite' ? citationItems(c) : labelItems(c), cc.query, 8);
+    active = 0;
+    draw();
+    const pos = caretCoords(ta);
+    list.style.display = 'block';
+    list.style.left = `${Math.max(4, Math.min(pos.left, window.innerWidth - list.offsetWidth - 8))}px`;
+    const below = pos.top + 2;
+    list.style.top = `${below + list.offsetHeight > window.innerHeight ? Math.max(4, pos.top - list.offsetHeight - 24) : below}px`;
+  };
+  const accept = (k: number, mode: 'enter' | 'tab') => {
+    const it = items[k];
+    if (!it || !cc) return;
+    let from = cc.from;
+    let to = cc.to;
+    // From the toolbar's \ref{, equations read better as \eqref.
+    if (cc.kind === 'ref' && it.kind === 'equation' && cc.command === 'ref' && ta.value.slice(0, from).endsWith('\\ref{')) {
+      ta.setRangeText('\\eqref{', from - '\\ref{'.length, from, 'preserve');
+      from += 2;
+      to += 2;
+    }
+    const after = ta.value.slice(to);
+    let ins: string;
+    if (mode === 'tab' && cc.kind === 'cite') {
+      // Insert the key and a separator, ready for the next key.
+      ins = `${it.key}, `;
+      if (after.startsWith(',')) to += after.startsWith(', ') ? 2 : 1;
+    } else {
+      ins = `${it.key}}`;
+      if (after.startsWith('}')) to += 1;
+    }
+    ta.setRangeText(ins, from, to, 'end');
+    hide();
+    ta.dispatchEvent(new Event('input'));
+    onAccept?.(mode);
+  };
+
+  ta.addEventListener(
+    'keydown',
+    (e) => {
+      if (list.style.display === 'none' || !cc) return;
+      const stop = () => {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      };
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        stop();
+        if (items.length) active = (active + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length;
+        draw();
+      } else if ((e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) || e.key === 'Tab') {
+        if (!items.length) return;
+        stop();
+        accept(active, e.key === 'Tab' ? 'tab' : 'enter');
+      } else if (e.key === 'Escape') {
+        stop();
+        dismissedAt = cc.from;
+        hide();
+      }
+    },
+    { capture: true },
+  );
+  ta.addEventListener('input', update);
+  ta.addEventListener('focus', update);
+  ta.addEventListener('click', update);
+  ta.addEventListener('keyup', (e) => {
+    if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) update();
+  });
+  ta.addEventListener('blur', () => setTimeout(() => document.activeElement !== ta && hide(), 120));
+  list.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const row = (e.target as HTMLElement).closest<HTMLElement>('.cmp[data-k]');
+    if (row) accept(Number(row.dataset.k), 'enter');
+  });
+  return () => list.remove();
 }
 
 // ---------------------------------------------------------------------------

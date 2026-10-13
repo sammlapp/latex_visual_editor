@@ -1,8 +1,9 @@
 **
 !dist/**
+!images/icon.png
 !package.json
 !README.md
-!LICENSE
 !CHANGELOG.md
-dist/latex.cjs*
+!LICENSE
+!THIRD_PARTY_NOTICES.md
 dist/**/*.map

@@ -1,66 +1,115 @@
-# LaTeX Visual Editor
+# Swan LaTeX Visual Editor
 
-A visual editor for `.tex` files in VS Code. Text, equations, tables, figures
-and cross-references are rendered inline, and you **type directly into the
-rendered page**. The `.tex` file stays the source of truth: every keystroke
-becomes a small edit of the LaTeX source, so undo, save, git and other LaTeX
-extensions keep working.
+Write LaTeX the way you'd write a document. Text, equations, tables, figures,
+citations and cross-references render inline, and you type directly into the
+rendered page. Behind the scenes every keystroke becomes a small, precise edit
+of your `.tex` source, so undo, save, git, LaTeX Workshop and your build all
+keep working exactly as before.
 
-## Usage
+![Typing, inline math and citation completion](images/demo.gif)
 
-- Open a `.tex` file and click the preview icon in the editor title bar
-  (**Open Visual Editor to the Side**), or run **LaTeX: Open Visual Editor**,
-  or right-click the file → *Open With…* → *LaTeX Visual Editor*.
-- To always open `.tex` files visually, add to settings:
-  `"workbench.editorAssociations": { "*.tex": "latexVisual.editor" }`
+> **Preview release.** The `.tex` file is always the source of truth and edits
+> are minimal, but please keep your work under version control and
+> [report anything odd](https://github.com/sammlapp/latex_visual_editor/issues).
 
-### Typing
+## Install
 
-- Click into any paragraph, heading, caption, table cell, footnote or the title
-  and type. Characters with a special meaning in LaTeX (`% & # _ { } ~ ^`) are
-  escaped for you.
-- **Enter** splits a paragraph (or starts a new paragraph at the end of one);
-  at the end of a list item it starts a new `\item`, and on an empty item it
-  leaves the list. **Backspace** at the start of a paragraph joins it to the
-  previous one. **Shift+Enter** inserts a line break (`\\`).
-- **⌘/Ctrl+B** and **⌘/Ctrl+I** wrap the selection in `\textbf{…}` / `\emph{…}`
-  (again to remove). **⌘/Ctrl+Z** undoes through VS Code's normal history.
-- Type **`$`** (or press ⌘/Ctrl+M) to insert inline math, and **`\`** to insert
-  any LaTeX command, both in a small popover with a live preview.
-- **→ Ref** and **❝ Cite** insert `\ref` / `\cite` at the caret from a
-  searchable list of labels and bibliography entries.
+- **VSCodium, Cursor, Windsurf, Gitpod and other Open VSX editors:** search for
+  *Swan LaTeX Visual Editor* in the Extensions view.
+- **VS Code:** download the `.vsix` from the
+  [latest release](https://github.com/sammlapp/latex_visual_editor/releases/latest), then in the
+  Extensions view choose **··· → Install from VSIX…** (or run
+  `code --install-extension swan-latex-visual-editor-<version>.vsix`).
 
-### Math, figures, tables and other blocks
+## Getting started
 
-- Click inline math, a display equation, a figure, a table's border or any
-  other non-text element to edit its source with a live preview
-  (`Esc` or `⌘/Ctrl+Enter` to finish).
-- Hover any block and click **`</>`** at its left to edit its full source.
-- Click a reference or citation to jump to its target (⌥/Alt+click to edit it).
-- The toolbar inserts sections, equations, tables, figures (pick an image file)
-  and lists after the current block.
+1. Open a `.tex` file.
+2. Click the preview icon in the editor title bar (**Open Visual Editor to the
+   Side**), or run **LaTeX: Open Visual Editor** from the Command Palette, or
+   right-click the file → *Open With…* → *Swan LaTeX Visual Editor*.
 
-## What is rendered
+To always open `.tex` files visually, add this to your settings:
+
+```json
+"workbench.editorAssociations": { "*.tex": "latexVisual.editor" }
+```
+
+## Editing
+
+**Text.** Click into any paragraph, heading, caption, table cell, footnote or
+the title and type. Characters that mean something in LaTeX (`% & # _ { } ~ ^`)
+are escaped for you.
+
+| Action | How |
+| --- | --- |
+| New paragraph / split paragraph | Enter |
+| Join with previous paragraph | Backspace at the start |
+| New list item / leave the list | Enter at the end of an item / on an empty item |
+| Line break (`\\`) | Shift+Enter |
+| Bold / italic (toggle) | ⌘/Ctrl+B, ⌘/Ctrl+I |
+| Inline math | type `$` (or ⌘/Ctrl+M) |
+| Any LaTeX command | type `\` |
+| Undo / redo | ⌘/Ctrl+Z, ⇧⌘Z / Ctrl+Y (VS Code's normal history) |
+
+**Citations and references.** Type `\cite{` (or `\citep{`, `\citet{`, …) or
+click **❝ Cite**, and your bibliography appears as you type. Matching is by
+whole words across keys, author names and title words, so `lapp opensoundscape`
+finds *Lapp et al. (2023), "OpenSoundscape: …"*. Enter inserts the key, Tab adds
+another. `\ref{` / **→ Ref** completes labels the same way.
+
+**Math, figures, tables and everything else.** Click an equation, figure or
+table (or inline math) to edit its source with a live preview. Hover any block
+and click **`</>`** at its left to edit its full LaTeX source. Click a
+reference or citation to jump to its target (⌥/Alt+click to edit it).
+
+The toolbar inserts sections, equations, tables, figures (pick an image file)
+and lists after the current block. **◐ Paper** toggles between your color
+theme and a white page; **{ } Source** opens the LaTeX side by side, and the
+visual view follows your cursor in the source.
+
+![The visual editor](images/screenshot.png)
+
+## What renders
 
 | Element | Support |
 | --- | --- |
-| Text | paragraphs, `\textbf` `\emph` `\texttt` etc., size/style switches, accents, quotes, dashes, `~`, footnotes, `\url`/`\href`, user `\newcommand`s |
-| Math | inline `$…$` `\(…\)`; display `\[…\]` `$$…$$`, `equation`, `align`, `gather`, `multline`, `eqnarray`, `alignat` (via KaTeX) with LaTeX-style numbering, `\nonumber`, `\tag`, preamble macros and `\DeclareMathOperator` |
-| Tables | `tabular`/`tabularx`/`longtable`, column alignment, `\|` borders, `\hline`, booktabs rules, `\cline`/`\cmidrule`, `\multicolumn`, `\multirow` |
-| Figures | `\includegraphics` (PNG/JPG/SVG/GIF, and PDF via pdf.js) with `width`/`scale`, `\graphicspath`, subfigures, captions |
-| References | `\label`, `\ref`, `\eqref`, `\autoref`, `\cref`; `\cite`/`\citep`/`\citet` etc. from `.bib` files or `thebibliography`; reference list |
-| Structure | `\maketitle`, abstract, sections (numbered, `\appendix`), lists, theorem-like environments, proofs, `\tableofcontents`, verbatim |
+| Text | paragraphs, `\textbf`, `\emph`, `\texttt`, size and style switches, accents, quotes, dashes, `~`, footnotes, `\url` / `\href`, your own `\newcommand`s |
+| Math | `$…$`, `\(…\)`, `\[…\]`, `$$…$$`, `equation`, `align`, `gather`, `multline`, `eqnarray`, `alignat` via KaTeX, with LaTeX-style numbering, `\nonumber`, `\tag`, preamble macros and `\DeclareMathOperator` |
+| Tables | `tabular`, `tabularx`, `longtable`; column alignment, `\|` rules, `\hline`, booktabs, `\cline` / `\cmidrule`, `\multicolumn`, `\multirow` |
+| Figures | `\includegraphics` for PNG, JPG, SVG, GIF and PDF (first page), `width` / `scale`, `\graphicspath`, subfigures, captions |
+| References | `\label`, `\ref`, `\eqref`, `\autoref`, `\cref`; `\cite`, `\citep`, `\citet`, … from `.bib` files or `thebibliography`, with a numbered reference list |
+| Structure | `\maketitle`, abstract, numbered sections and `\appendix`, lists, theorem-like environments, proofs, `\tableofcontents`, verbatim |
 
-Anything else is shown in a muted style rather than hidden, so no content is lost.
+Anything the editor doesn't understand is shown dimmed rather than hidden, so no
+content is lost.
+
+## Known limitations
+
+- Math is edited in a source popover rather than typed in place.
+- Changing a table's structure (rows, columns, rules) uses the source editor.
+- `\input` / `\include` files are shown as links rather than inline.
+- EPS figures show a placeholder.
+
+## Settings
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `latexVisual.pageStyle` | `theme` | Initial page style: follow the color theme, or `paper` for a white page. |
 
 ## Development
 
-```
+```sh
 npm install
-npm run build          # bundle to dist/
-npm run test:unit      # parser/renderer tests (node)
-npm run test:integration  # runs inside VS Code against sample/paper.tex
-npm run package        # build a .vsix
+npm run build              # bundle to dist/
+npm run test:unit          # parser / renderer / completion tests
+npm run test:browser       # drives the webview in Chrome with real keystrokes
+npm run test:integration   # runs inside VS Code against test/fixtures/paper.tex
+npm run package            # production .vsix
 ```
 
 Press F5 in VS Code to launch an Extension Development Host with the sample paper.
+
+## License
+
+MIT. Bundles [KaTeX](https://katex.org) (MIT) and [PDF.js](https://mozilla.github.io/pdf.js/) (Apache-2.0); see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

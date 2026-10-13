@@ -374,3 +374,32 @@ body.paper .popover { background: #fff; }
 body.paper .popover textarea { background: #fafafa; color: #1a1a1a; }
 .popover-preview { padding: 4px 10px; min-height: 1.4em; font-family: var(--serif); font-size: 16px; color: var(--fg); border-top: 1px solid var(--border); }
 .popover-hint { font-family: var(--sans); font-size: 10px; color: var(--muted); padding: 2px 8px 4px; }
+
+/* Key completion ------------------------------------------------------------- */
+
+.complete {
+  position: fixed;
+  z-index: 60;
+  width: 420px;
+  max-width: calc(100vw - 16px);
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--vscode-editorSuggestWidget-background, var(--vscode-editorWidget-background, #fff));
+  color: var(--vscode-editorSuggestWidget-foreground, var(--fg));
+  border: 1px solid var(--vscode-editorSuggestWidget-border, var(--border));
+  border-radius: 6px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25);
+  font-family: var(--sans);
+  font-size: 12px;
+}
+body.paper .complete { background: #fff; color: #1a1a1a; }
+.cmp { padding: 4px 8px; cursor: pointer; }
+.cmp-main { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cmp-main span { color: var(--muted); margin-left: 4px; }
+.cmp-info { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cmp.active { background: var(--vscode-editorSuggestWidget-selectedBackground, var(--vscode-list-activeSelectionBackground, rgba(37, 99, 235, 0.15))); color: var(--vscode-editorSuggestWidget-selectedForeground, inherit); }
+body.paper .cmp.active { background: rgba(37, 99, 235, 0.12); color: inherit; }
+/* On the highlighted row, secondary text follows the row's foreground (grey on blue is unreadable). */
+.cmp.active .cmp-main span, .cmp.active .cmp-info { color: inherit; opacity: 0.85; }
+.cmp.empty { color: var(--muted); cursor: default; }
+.cmp-hint { font-size: 10px; color: var(--muted); padding: 3px 8px; border-top: 1px solid var(--border); }

@@ -4,3 +4,9 @@ dist/
 *.vsix
 test/harness/index.html
 sample/paper.pdf
+sample/*.aux
+sample/*.log
+sample/*.fls
+sample/*.fdb_latexmk
+sample/*.out
+sample/*.synctex.gz

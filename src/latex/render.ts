@@ -321,8 +321,8 @@ function inline(t: string, s: number, e: number, st: InlineState): string {
   if (st.depth > 40) return escapeHtml(t.slice(s, e));
   let out = '';
   let i = s;
-  let emitted = false;
-  let prevIsland = false;
+  /** Kind of the last emitted piece: plain text run, island, or other markup (formatting, groups). */
+  let prev: 'none' | 'run' | 'island' | 'other' = 'none';
   while (i < e) {
     const run = scanRun(t, i, e, st.ctx);
     if (run.length) {
@@ -330,24 +330,21 @@ function inline(t: string, s: number, e: number, st: InlineState): string {
       const text = escapeHtml(run.map((r) => r.out).join(''));
       out += st.mapped ? `<span class="r" data-s="${i}" data-e="${end}">${text}</span>` : text;
       i = end;
-      emitted = true;
-      prevIsland = false;
+      prev = 'run';
       continue;
     }
     const [html, next, stop] = inlineStep(t, i, e, st);
     if (html) {
-      const isl = st.mapped && html.startsWith('<span class="isl');
-      // An island at the start, or right after another island, gets a caret anchor before it.
-      if (isl && (!emitted || prevIsland)) out += anchor(i);
+      const kind = st.mapped && html.startsWith('<span class="isl') ? 'island' : 'other';
+      // Islands need a text position beside them for the caret wherever no text run is adjacent.
+      if (st.mapped && ((kind === 'island' && prev !== 'run') || (kind === 'other' && prev === 'island'))) out += anchor(i);
       out += html;
-      emitted = true;
-      prevIsland = isl;
+      prev = kind;
     }
     i = next;
     if (stop) break;
   }
-  // ...and so does one at the very end.
-  if (prevIsland) out += anchor(e);
+  if (prev === 'island') out += anchor(e);
   return out;
 }
 

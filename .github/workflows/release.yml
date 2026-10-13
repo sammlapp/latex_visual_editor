@@ -1,0 +1,46 @@
+name: Release
+
+# Push a tag like v0.1.1 (matching package.json's version) to:
+#   1. attach the .vsix to a GitHub Release (installable in any VS Code via "Install from VSIX…"),
+#   2. publish to Open VSX if the OVSX_PAT secret is set (VSCodium, Cursor, Windsurf, Gitpod, …),
+#   3. publish to the VS Code Marketplace if the VSCE_PAT secret is set.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Check tag matches package.json version
+        run: test "v$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME}"
+      - run: npm run typecheck
+      - run: npm run test:unit
+      - run: npm run test:browser
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
+      - run: xvfb-run -a npm run test:integration
+      - name: Package
+        run: npm run package
+      - name: GitHub Release with the .vsix
+        run: gh release create "$GITHUB_REF_NAME" *.vsix --title "$GITHUB_REF_NAME" --notes "See CHANGELOG.md. Install: Extensions view → ··· → Install from VSIX…"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Publish to Open VSX
+        if: ${{ env.OVSX_PAT != '' }}
+        run: npx ovsx publish *.vsix
+      - name: Publish to the VS Code Marketplace
+        if: ${{ env.VSCE_PAT != '' }}
+        run: npx vsce publish --no-dependencies --packagePath *.vsix

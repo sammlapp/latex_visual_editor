@@ -1,23 +1,41 @@
 {
-  "name": "latex-visual-editor",
-  "displayName": "LaTeX Visual Editor",
+  "name": "swan-latex-visual-editor",
+  "displayName": "Swan LaTeX Visual Editor",
   "description": "Edit LaTeX documents visually: text, equations, tables, figures and cross-references render inline; click any block to edit its source with a live preview.",
   "version": "0.1.0",
+  "preview": true,
   "publisher": "sammlapp",
   "license": "MIT",
+  "icon": "images/icon.png",
+  "galleryBanner": {
+    "color": "#1d3a8f",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sammlapp/latex_visual_editor.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sammlapp/latex_visual_editor/issues"
+  },
+  "homepage": "https://github.com/sammlapp/latex_visual_editor#readme",
   "engines": {
     "vscode": "^1.90.0"
   },
   "categories": [
     "Visualization",
+    "Formatters",
     "Other"
   ],
   "keywords": [
     "latex",
     "tex",
     "wysiwyg",
-    "visual",
-    "katex"
+    "visual editor",
+    "katex",
+    "bibtex",
+    "academic",
+    "paper"
   ],
   "main": "./dist/extension.js",
   "activationEvents": [],
@@ -25,7 +43,7 @@
     "customEditors": [
       {
         "viewType": "latexVisual.editor",
-        "displayName": "LaTeX Visual Editor",
+        "displayName": "Swan LaTeX Visual Editor",
         "selector": [
           {
             "filenamePattern": "*.tex"
@@ -90,7 +108,7 @@
       ]
     },
     "configuration": {
-      "title": "LaTeX Visual Editor",
+      "title": "Swan LaTeX Visual Editor",
       "properties": {
         "latexVisual.pageStyle": {
           "type": "string",
@@ -99,7 +117,7 @@
             "paper"
           ],
           "default": "theme",
-          "description": "Initial page style: follow the VS Code colour theme, or render on a white paper sheet. Toggle per editor with the \u25d0 Paper button."
+          "description": "Initial page style: follow the VS Code color theme, or render on a white paper sheet. Toggle per editor with the \u25d0 Paper button."
         }
       }
     }
@@ -112,7 +130,9 @@
     "test:integration": "node scripts/build.mjs && node test/integration/run.mjs",
     "test": "npm run typecheck && npm run test:unit && npm run test:browser && npm run test:integration",
     "package": "node scripts/build.mjs --production && vsce package --no-dependencies",
-    "test:browser": "node scripts/build.mjs && node test/browser/inline.cjs"
+    "test:browser": "node scripts/build.mjs && node test/browser/inline.cjs",
+    "publish:vsce": "node scripts/build.mjs --production && vsce publish --no-dependencies",
+    "publish:ovsx": "node scripts/build.mjs --production && vsce package --no-dependencies && ovsx publish *.vsix"
   },
   "dependencies": {
     "katex": "^0.16.11",
@@ -124,6 +144,7 @@
     "@vscode/test-electron": "2.4.1",
     "@vscode/vsce": "3.2.1",
     "esbuild": "0.24.0",
+    "ovsx": "^0.10.1",
     "puppeteer-core": "^23.6.0",
     "typescript": "5.6.3"
   }

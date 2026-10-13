@@ -305,7 +305,7 @@ class EditorSession {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="stylesheet" href="${asset('media/katex/katex.min.css')}">
 <link rel="stylesheet" href="${asset('media/style.css')}">
-<title>LaTeX Visual Editor</title>
+<title>Swan LaTeX Visual Editor</title>
 </head>
 <body data-pdf-worker="${asset('media/pdfjs/pdf.worker.min.js')}" data-paper="${paper}">
 <script nonce="${nonce}" src="${asset('media/pdfjs/pdf.min.js')}"></script>
@@ -326,7 +326,7 @@ async function exists(uri: vscode.Uri): Promise<boolean> {
 
 export class LatexVisualEditorProvider implements vscode.CustomTextEditorProvider {
   readonly sessions = new Set<EditorSession>();
-  private output = vscode.window.createOutputChannel('LaTeX Visual Editor');
+  private output = vscode.window.createOutputChannel('Swan LaTeX Visual Editor');
 
   constructor(readonly context: vscode.ExtensionContext) {}
 
