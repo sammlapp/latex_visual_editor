@@ -201,7 +201,7 @@ dl.description dd { margin-left: 1.5em; }
 .theorem { font-style: italic; margin: 0.6em -10px; }
 .thm-head { float: left; margin: 0.35em 0.4em 0 0; font-style: normal; font-weight: bold; }
 .proof-head { font-style: italic; font-weight: normal; }
-.qed { display: block; text-align: right; margin-top: -1.4em; }
+.qed { display: block; text-align: right; margin-top: -1.4em; pointer-events: none; }
 .center { text-align: center; }
 .center p { text-align: center; }
 .flushright p { text-align: right; }
@@ -318,3 +318,59 @@ body.paper .editor textarea { background: #fafafa; color: #1a1a1a; }
 .pick span { color: var(--muted); }
 .pick.active, .pick:hover { background: var(--vscode-list-activeSelectionBackground, rgba(37, 99, 235, 0.15)); color: var(--vscode-list-activeSelectionForeground, inherit); }
 .pick.empty { color: var(--muted); cursor: default; }
+
+/* Inline editing ------------------------------------------------------------ */
+
+#doc { outline: none; caret-color: var(--accent); }
+#page { position: relative; }
+.ed { white-space: pre-wrap; outline: none; }
+.ed .isl, .ed .katex { white-space: normal; }
+.blk .ed:focus-within { }
+.isl { cursor: pointer; border-radius: 3px; }
+.isl.math:hover, .isl.macro:hover { background: var(--hover); box-shadow: 0 0 0 1px var(--border); }
+.blk[contenteditable="false"] { cursor: pointer; }
+.blk[contenteditable="false"] .ed { cursor: text; }
+.blk-paragraph.phantom p { min-height: 1.5em; border-left: 2px solid var(--accent); padding-left: 6px; margin-left: -8px; }
+.blk-paragraph.phantom p::after { content: 'Type to add a paragraph'; color: var(--muted); opacity: 0.6; font-style: italic; pointer-events: none; }
+.blk-paragraph.phantom p:not(:has(br:only-child))::after { content: none; }
+.blk.selected { box-shadow: none; }
+#gutter {
+  display: none;
+  position: absolute;
+  z-index: 5;
+  padding: 1px 5px;
+  font-family: var(--mono);
+  font-size: 10px;
+  opacity: 0.55;
+}
+#gutter:hover { opacity: 1; }
+body.paper #gutter { background: #f0f0f0; color: #333; }
+.editor.inline-editor { display: inline-block; vertical-align: top; min-width: 320px; margin: 2px 0; text-indent: 0; white-space: normal; }
+.popover {
+  position: fixed;
+  z-index: 40;
+  width: 320px;
+  max-width: 90vw;
+  background: var(--vscode-editorWidget-background, var(--bg));
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
+body.paper .popover { background: #fff; }
+.popover textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  border: none;
+  outline: none;
+  resize: none;
+  padding: 6px 8px;
+  font-family: var(--mono);
+  font-size: 13px;
+  background: var(--input-bg);
+  color: var(--input-fg);
+}
+body.paper .popover textarea { background: #fafafa; color: #1a1a1a; }
+.popover-preview { padding: 4px 10px; min-height: 1.4em; font-family: var(--serif); font-size: 16px; color: var(--fg); border-top: 1px solid var(--border); }
+.popover-hint { font-family: var(--sans); font-size: 10px; color: var(--muted); padding: 2px 8px 4px; }

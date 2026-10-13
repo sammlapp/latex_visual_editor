@@ -10,7 +10,7 @@ delete process.env.ELECTRON_RUN_AS_NODE;
 const root = path.resolve('.');
 const installed = ['Code', 'Electron'].map((b) => `/Applications/Visual Studio Code.app/Contents/MacOS/${b}`).find(existsSync);
 const workspace = mkdtempSync(path.join(tmpdir(), 'latex-visual-ws-'));
-cpSync(path.join(root, 'sample'), workspace, { recursive: true });
+cpSync(path.join(root, 'test/fixtures'), workspace, { recursive: true });
 const userData = mkdtempSync(path.join(tmpdir(), 'latex-visual-user-'));
 
 await runTests({

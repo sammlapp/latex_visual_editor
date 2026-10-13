@@ -5,6 +5,7 @@
 \usepackage{subcaption}
 \usepackage[numbers]{natbib}
 \usepackage{hyperref}
+\usepackage{amsmath}
 \graphicspath{{figures/}}
 
 \newcommand{\R}{\mathbb{R}}
@@ -81,26 +82,26 @@ signal and Figure~\ref{fig:pair} compares two views.
   \label{fig:signal}
 \end{figure}
 
-\begin{figure}[htbp]
-  \centering
-  \begin{subfigure}{0.45\textwidth}
-    \includegraphics[width=\linewidth]{spectrum.png}
-    \caption{PNG version}
-    \label{fig:pair-a}
-  \end{subfigure}
-  \hfill
-  \begin{subfigure}{0.45\textwidth}
-    \includegraphics[width=\linewidth]{missing-figure}
-    \caption{A missing file}
-  \end{subfigure}
-  \caption{Two views; panel~\ref{fig:pair-a} is a PNG.}
+\
+
+
+} is a PNG.}
   \label{fig:pair}
 \end{figure}
 
-\subsection{Discussion}
-\begin{itemize}
-  \item Lists render with their items, including math like $\int_0^1 x\,dx = \tfrac12$.
-  \item Theorem~\ref{thm:conv} is referenced by number.
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.7\linewidth]{figures/spectrum.png}
+  \caption{Caption for spectrum.}
+  \label{fig:spectrum}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.7\linewidth]{figures/spectrum.png}
+  \caption{Caption for spectrum.}
+  \label{fig:spectrum}
+\end{figure}erenced by number.
   \item An undefined reference shows as \ref{sec:nowhere}.
 \end{itemize}
 
@@ -113,4 +114,39 @@ signal and Figure~\ref{fig:pair} compares two views.
 \bibliographystyle{plain}
 \bibliography{refs}
 
-\end{document}
+\section{Title}
+
+What if we could type latex like it were a document? \citep{farnsworth}
+
+New paragraph.
+
+\
+\include{table.tex} LateX! $x-2 = \frac{1}{2_{{\alpha}}}$
+
+\begin{table}[htbp]
+  \centering
+  \begin{tabular}{lcc}
+    \toprule
+    Item & A & B \\
+    \midrule
+    First & 1 & 2 \\
+    Second & 3 & 4 \\
+    \bottomrule
+  \end{tabular}
+  \caption{New table.}
+  \label{tab:new}
+\end{table}
+
+\begin{table}[htbp]
+  \centering
+  \begin{tabular}{lcc}
+    \toprule
+    Item & A & B \\
+    \midrule
+    First & 1 & 2 \\
+    Second & 3 & 4 \\
+    \bottomrule
+  \end{tabular}
+  \caption{New table.}
+  \label{tab:new}
+\end{table}

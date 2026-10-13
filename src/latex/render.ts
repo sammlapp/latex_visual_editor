@@ -5,7 +5,7 @@
 import katex from 'katex';
 import { BibEntry, shortAuthors, splitAuthors } from './bib';
 import { CITE_COMMANDS, Ctx, findSubfigures } from './context';
-import { Block, MATH_ENVS, parseBlocks } from './parser';
+import { Block, ListItem, MATH_ENVS, parseBlocks } from './parser';
 import {
   escapeHtml,
   findEnvEnd,
@@ -18,6 +18,7 @@ import {
   skipInlineSpace,
   splitTopLevel,
   stripComments,
+  trimRange,
 } from './util';
 
 // ---------------------------------------------------------------------------
@@ -156,386 +157,477 @@ interface InlineState {
   ctx: Ctx;
   depth: number;
   footnotes: string[];
+  /**
+   * True when `t` is the document text itself. Output then carries source
+   * offsets (data-s/data-e on text runs and formatting, data-start/data-end on
+   * atomic "islands") so the webview can map the caret back to the source.
+   */
+  mapped: boolean;
 }
 
-export function renderInline(src: string, ctx: Ctx, footnotes: string[] = []): string {
-  return inline(stripComments(src), { ctx, depth: 0, footnotes });
+interface CmdResult {
+  html: string;
+  end: number;
+  /** A style switch (\bfseries): html is an open <span> covering the rest of the group. */
+  switchOpen?: boolean;
 }
 
-function inline(s: string, st: InlineState): string {
-  if (st.depth > 40) return escapeHtml(s);
-  let out = '';
-  let i = 0;
-  const n = s.length;
-  while (i < n) {
-    const c = s[i];
-    if (c === '\\') {
-      const name = readCommandName(s, i);
-      if (name === '') {
-        i++;
-        continue;
+/** One rendered piece of a plain-text run and the source range it came from. */
+export interface RunToken {
+  out: string;
+  s: number;
+  e: number;
+}
+
+const RUN_ESCAPES = '%&$#_{}';
+
+const deeper = (st: InlineState): InlineState => ({ ...st, depth: st.depth + 1 });
+
+/**
+ * Scans a maximal run of "plain" text starting at i: characters, escapes like
+ * \%, dashes, quotes, ties, accents and simple symbol commands. Runs are
+ * rendered as editable text; the same function maps caret positions back to
+ * source offsets in the webview, so both always agree.
+ */
+export function scanRun(t: string, i: number, e: number, ctx: Ctx): RunToken[] {
+  const tokens: RunToken[] = [];
+  while (i < e) {
+    const c = t[i];
+    let out: string | null = null;
+    let j = i + 1;
+    if (c === ' ' || c === '\t' || c === '\r' || c === '\n') {
+      while (j < e && (t[j] === ' ' || t[j] === '\t' || t[j] === '\r' || t[j] === '\n')) j++;
+      out = ' ';
+    } else if (c === '-') {
+      if (i + 3 <= e && t.startsWith('---', i)) {
+        out = '—';
+        j = i + 3;
+      } else if (i + 2 <= e && t.startsWith('--', i)) {
+        out = '–';
+        j = i + 2;
+      } else out = '-';
+    } else if (c === '`') {
+      if (i + 2 <= e && t[i + 1] === '`') {
+        out = '“';
+        j = i + 2;
+      } else out = '‘';
+    } else if (c === "'") {
+      if (i + 2 <= e && t[i + 1] === "'") {
+        out = '”';
+        j = i + 2;
+      } else out = '’';
+    } else if (c === '~') {
+      out = ' ';
+    } else if (c === '\\') {
+      const r = runCommand(t, i, e, ctx);
+      if (r) {
+        out = r.out;
+        j = r.end;
       }
-      const after = i + 1 + name.length;
-      if (!isLetter(name[0])) {
-        const [html, next] = symbolCommand(s, name, after, st);
-        out += html;
-        i = next;
-        continue;
-      }
-      // Control words swallow following spaces.
-      const [html, next, rest] = wordCommand(s, name, after, st);
-      if (rest) {
-        // Style switch: applies to the remainder of the group.
-        out += html + inline(s.slice(next), { ...st, depth: st.depth + 1 }) + '</span>';
-        return out;
-      }
-      out += html;
-      i = next;
-      continue;
+    } else if (c !== '$' && c !== '{' && c !== '}' && c !== '%') {
+      out = c;
     }
-    if (c === '$') {
-      if (s[i + 1] === '$') {
-        const close = s.indexOf('$$', i + 2);
-        const end = close === -1 ? n : close;
-        out += renderKatex(s.slice(i + 2, end), true, st.ctx);
-        i = end + 2;
-        continue;
-      }
-      let j = i + 1;
-      for (; j < n; j++) {
-        if (s[j] === '\\') {
-          j++;
-          continue;
-        }
-        if (s[j] === '$') break;
-      }
-      out += renderKatex(s.slice(i + 1, j), false, st.ctx);
-      i = j + 1;
-      continue;
-    }
-    if (c === '{') {
-      const g = readGroup(s, i);
-      if (!g) {
-        i++;
-        continue;
-      }
-      out += inline(s.slice(g.innerStart, g.innerEnd), { ...st, depth: st.depth + 1 });
-      i = g.end;
-      continue;
-    }
-    if (c === '}') {
-      i++;
-      continue;
-    }
-    if (c === '~') {
-      out += '&nbsp;';
-      i++;
-      continue;
-    }
-    if (c === '-') {
-      if (s.startsWith('---', i)) {
-        out += '—';
-        i += 3;
-      } else if (s.startsWith('--', i)) {
-        out += '–';
-        i += 2;
-      } else {
-        out += '-';
-        i++;
-      }
-      continue;
-    }
-    if (c === '`') {
-      if (s[i + 1] === '`') {
-        out += '“';
-        i += 2;
-      } else {
-        out += '‘';
-        i++;
-      }
-      continue;
-    }
-    if (c === "'") {
-      if (s[i + 1] === "'") {
-        out += '”';
-        i += 2;
-      } else {
-        out += '’';
-        i++;
-      }
-      continue;
-    }
-    if (c === '\n' || c === ' ' || c === '\t' || c === '\r') {
-      if (!out.endsWith(' ') && !out.endsWith('<br>')) out += ' ';
-      i++;
-      continue;
-    }
-    if (c === '&') {
-      out += '<span class="amp">&amp;</span>';
-      i++;
-      continue;
-    }
-    if (c === '<') out += '&lt;';
-    else if (c === '>') out += '&gt;';
-    else if (c === '"') out += '&quot;';
-    else if (c === '^' || c === '_') out += c; // stray script chars outside math
-    else out += c;
-    i++;
+    if (out === null) break;
+    tokens.push({ out, s: i, e: j });
+    i = j;
   }
-  return out;
+  return tokens;
 }
 
-function symbolCommand(s: string, name: string, after: number, st: InlineState): [string, number] {
-  switch (name) {
-    case '\\': {
-      let j = after;
-      if (s[j] === '*') j++;
-      const k = skipInlineSpace(s, j);
-      if (s[k] === '[') {
-        const g = readOptional(s, k);
-        if (g) j = g.end;
-      }
-      return ['<br>', j];
-    }
-    case '(': {
-      const close = s.indexOf('\\)', after);
-      const end = close === -1 ? s.length : close;
-      return [renderKatex(s.slice(after, end), false, st.ctx), end + 2];
-    }
-    case '[': {
-      const close = s.indexOf('\\]', after);
-      const end = close === -1 ? s.length : close;
-      return [renderKatex(s.slice(after, end), true, st.ctx), end + 2];
-    }
-    case ',':
-      return ['\u2009', after];
-    case ';':
-    case ':':
-    case '>':
-      return ['\u2005', after];
-    case '!':
-    case '-':
-    case '/':
-    case '@':
-      return ['', after];
-    case ' ':
-    case '\n':
-      return [' ', after];
+function runCommand(t: string, i: number, e: number, ctx: Ctx): { out: string; end: number } | null {
+  if (i + 1 >= e) return null;
+  const nx = t[i + 1];
+  if (RUN_ESCAPES.includes(nx)) return { out: nx, end: i + 2 };
+  if (nx === ' ' || nx === '\n') return { out: ' ', end: i + 2 };
+  if (nx === ',') return { out: ' ', end: i + 2 };
+  if (nx === ';' || nx === ':' || nx === '>') return { out: ' ', end: i + 2 };
+  if (nx === '@' || nx === '/' || nx === '-' || nx === '!') return { out: '', end: i + 2 };
+  if (nx in SYMBOL_ACCENTS) return accentAt(t, i + 2, e, SYMBOL_ACCENTS[nx]);
+  if (!isLetter(nx)) return null;
+  const name = readCommandName(t, i);
+  const after = i + 1 + name.length;
+  if (after > e || ctx.textMacros.has(name)) return null;
+  if (name in LETTER_ACCENTS && t[after] === '{') return accentAt(t, after, e, LETTER_ACCENTS[name]);
+  const sym = SYMBOLS[name];
+  if (sym !== undefined && !/[<&]/.test(sym)) {
+    let j = after;
+    if (j + 2 <= e && t[j] === '{' && t[j + 1] === '}') j += 2;
+    else j = skipInlineSpace(t, j, e);
+    return { out: sym, end: j };
   }
-  if (name in SYMBOL_ACCENTS) return accent(s, after, SYMBOL_ACCENTS[name]);
-  return [escapeHtml(name), after];
+  if (IGNORED.has(name)) return { out: '', end: skipInlineSpace(t, after, e) };
+  return null;
 }
 
-function accent(s: string, after: number, mark: string): [string, number] {
-  let j = skipInlineSpace(s, after);
+function accentAt(t: string, j: number, e: number, mark: string): { out: string; end: number } | null {
   let base = '';
-  if (s[j] === '{') {
-    const g = readGroup(s, j);
-    if (!g) return ['', after];
-    base = s.slice(g.innerStart, g.innerEnd).trim();
+  if (t[j] === '{') {
+    const g = readGroup(t, j, e);
+    if (!g) return null;
+    base = t.slice(g.innerStart, g.innerEnd).trim();
     j = g.end;
-  } else if (s[j] === '\\') {
-    const nm = readCommandName(s, j);
+  } else if (t[j] === '\\') {
+    const nm = readCommandName(t, j);
     base = '\\' + nm;
     j += 1 + nm.length;
-  } else {
-    base = s[j] ?? '';
+  } else if (j < e && /\S/.test(t[j])) {
+    base = t[j];
     j++;
-  }
+  } else return null;
   if (base === '\\i' || base === 'ı') base = 'i';
   else if (base === '\\j' || base === 'ȷ') base = 'j';
   else if (base.startsWith('\\')) base = SYMBOLS[base.slice(1)] ?? '';
-  return [escapeHtml((base + mark).normalize('NFC')), j];
+  return { out: (base + mark).normalize('NFC'), end: j };
 }
 
-/** Returns [html, nextIndex, isSwitch]. For switches, html is an open <span>. */
-function wordCommand(s: string, name: string, after: number, st: InlineState): [string, number, boolean?] {
+/** Unmapped rendering of a LaTeX snippet (bib fields, labels, previews). */
+export function renderInline(src: string, ctx: Ctx, footnotes: string[] = []): string {
+  return inline(src, 0, src.length, { ctx, depth: 0, footnotes, mapped: false });
+}
+
+/** Trims a region like trimRange, but keeps spaces typed at the end of a line. */
+export function regionTrim(t: string, s: number, e: number): { start: number; end: number } {
+  const r = trimRange(t, s, e);
+  let end = r.end;
+  while (end < e && (t[end] === ' ' || t[end] === '\t')) end++;
+  return { start: r.start, end: r.start === r.end ? r.start : end };
+}
+
+/**
+ * An editable text region (paragraph, heading title, caption, table cell...)
+ * whose content maps to source [s, e). `prefix` is inserted before text typed
+ * into an empty region (e.g. a space after \item).
+ */
+function region(t: string, s: number, e: number, ctx: Ctx, footnotes: string[], kind: string, tag = 'span', cls = '', prefix = ''): string {
+  const r = regionTrim(t, s, e);
+  const inner = inline(t, r.start, r.end, { ctx, depth: 0, footnotes, mapped: true });
+  const pre = prefix ? ` data-prefix="${escapeHtml(prefix)}"` : '';
+  return `<${tag} class="ed${cls ? ' ' + cls : ''}" contenteditable="true" data-region="${kind}" data-s="${r.start}" data-e="${r.end}"${pre}>${inner || '<br>'}</${tag}>`;
+}
+
+function islandHtml(st: InlineState, html: string, a: number, b: number, cls = ''): string {
+  if (!st.mapped) return html;
+  return `<span class="isl${cls ? ' ' + cls : ''}" contenteditable="false" data-start="${a}" data-end="${b}">${html}</span>`;
+}
+
+/**
+ * A zero-width text anchor mapped to source offset `at`. Browsers cannot put
+ * the caret next to a non-editable island unless there is a text node there,
+ * so anchors go before/after islands that have no neighbouring text run.
+ */
+const anchor = (at: number) => `<span class="r anchor" data-s="${at}" data-e="${at}">\u200b</span>`;
+
+function inline(t: string, s: number, e: number, st: InlineState): string {
+  if (st.depth > 40) return escapeHtml(t.slice(s, e));
+  let out = '';
+  let i = s;
+  let emitted = false;
+  let prevIsland = false;
+  while (i < e) {
+    const run = scanRun(t, i, e, st.ctx);
+    if (run.length) {
+      const end = run[run.length - 1].e;
+      const text = escapeHtml(run.map((r) => r.out).join(''));
+      out += st.mapped ? `<span class="r" data-s="${i}" data-e="${end}">${text}</span>` : text;
+      i = end;
+      emitted = true;
+      prevIsland = false;
+      continue;
+    }
+    const [html, next, stop] = inlineStep(t, i, e, st);
+    if (html) {
+      const isl = st.mapped && html.startsWith('<span class="isl');
+      // An island at the start, or right after another island, gets a caret anchor before it.
+      if (isl && (!emitted || prevIsland)) out += anchor(i);
+      out += html;
+      emitted = true;
+      prevIsland = isl;
+    }
+    i = next;
+    if (stop) break;
+  }
+  // ...and so does one at the very end.
+  if (prevIsland) out += anchor(e);
+  return out;
+}
+
+/** Renders one non-run construct at i. Returns [html, nextIndex, stop] (stop: a style switch consumed the rest). */
+function inlineStep(t: string, i: number, e: number, st: InlineState): [string, number, boolean] {
+  {
+    const c = t[i];
+    if (c === '%') {
+      // TeX drops the comment, its newline and the next line's indentation.
+      let j = skipComment(t, i, e);
+      if (j < e) {
+        j++;
+        while (j < e && (t[j] === ' ' || t[j] === '\t')) j++;
+      }
+      return ['', j, false];
+    }
+    if (c === '$') {
+      if (t[i + 1] === '$') {
+        const close = t.indexOf('$$', i + 2);
+        const end = close === -1 || close > e ? e : close;
+        return [islandHtml(st, renderKatex(t.slice(i + 2, end), true, st.ctx), i, Math.min(end + 2, e), 'math'), end + 2, false];
+      }
+      let j = i + 1;
+      for (; j < e; j++) {
+        if (t[j] === '\\') {
+          j++;
+          continue;
+        }
+        if (t[j] === '$') break;
+      }
+      return [islandHtml(st, renderKatex(t.slice(i + 1, Math.min(j, e)), false, st.ctx), i, Math.min(j + 1, e), 'math'), j + 1, false];
+    }
+    if (c === '{') {
+      const g = readGroup(t, i, e);
+      if (!g) return ['', i + 1, false];
+      const inner = inline(t, g.innerStart, g.innerEnd, deeper(st));
+      return [st.mapped ? `<span data-s="${g.start}" data-e="${g.end}">${inner}</span>` : inner, g.end, false];
+    }
+    if (c === '}') return ['', i + 1, false];
+    // A backslash that did not start a plain-text run.
+    const name = readCommandName(t, i);
+    if (name === '') return ['', i + 1, false];
+    const after = i + 1 + name.length;
+    const r = isLetter(name[0]) ? wordCommand(t, i, name, after, e, st) : symbolCommand(t, i, name, after, e, st);
+    if (r.switchOpen) return [r.html + inline(t, r.end, e, deeper(st)) + '</span>', e, true];
+    return [r.html, Math.max(r.end, i + 1), false];
+  }
+}
+
+function symbolCommand(t: string, start: number, name: string, after: number, e: number, st: InlineState): CmdResult {
+  switch (name) {
+    case '\\': {
+      let j = after;
+      if (t[j] === '*') j++;
+      const k = skipInlineSpace(t, j, e);
+      if (t[k] === '[') {
+        const g = readOptional(t, k, e);
+        if (g) j = g.end;
+      }
+      j = skipInlineSpace(t, j, e);
+      return { html: st.mapped ? `<br data-s="${start}" data-e="${j}">` : '<br>', end: j };
+    }
+    case '(': {
+      const close = t.indexOf('\\)', after);
+      const end = close === -1 || close > e ? e : close;
+      return { html: islandHtml(st, renderKatex(t.slice(after, end), false, st.ctx), start, Math.min(end + 2, e), 'math'), end: end + 2 };
+    }
+    case '[': {
+      const close = t.indexOf('\\]', after);
+      const end = close === -1 || close > e ? e : close;
+      return { html: islandHtml(st, renderKatex(t.slice(after, end), true, st.ctx), start, Math.min(end + 2, e), 'math'), end: end + 2 };
+    }
+  }
+  return { html: islandHtml(st, escapeHtml(name), start, after), end: after };
+}
+
+function wordCommand(t: string, start: number, name: string, after: number, e: number, st: InlineState): CmdResult {
   const ctx = st.ctx;
-  const sub = (src: string) => inline(src, { ...st, depth: st.depth + 1 });
-  const arg = (g: { innerStart: number; innerEnd: number }) => s.slice(g.innerStart, g.innerEnd);
-  const spaceAfter = (j: number) => {
-    while (j < s.length && (s[j] === ' ' || s[j] === '\t')) j++;
-    return j;
+  const sub = (g: { innerStart: number; innerEnd: number }) => inline(t, g.innerStart, g.innerEnd, deeper(st));
+  const arg = (g: { innerStart: number; innerEnd: number }) => t.slice(g.innerStart, g.innerEnd);
+  const island = (html: string, end: number, cls = ''): CmdResult => ({ html: islandHtml(st, html, start, end, cls), end });
+  /** Editable formatting: the element carries the command's full source range. */
+  const fmt = (open: string, close: string, inner: string, end: number): CmdResult => {
+    if (!st.mapped) return { html: open + inner + close, end };
+    const attr = ` data-s="${start}" data-e="${end}"`;
+    if (open.startsWith('<')) return { html: open.replace(/^<([a-z0-9]+)/, `<$1${attr}`) + inner + close, end };
+    return { html: `<span${attr}>${open}${inner}${close}</span>`, end };
   };
 
-  // User-defined macros take precedence over built-ins.
+  // User-defined macros take precedence over built-ins; their expansion has no
+  // source offsets, so it is rendered as an island.
   const macro = ctx.textMacros.get(name);
   if (macro && st.depth < 30) {
     let j = after;
     const vals: string[] = [];
     let nargs = macro.nargs;
     if (macro.optDefault !== undefined) {
-      const k = skipInlineSpace(s, j);
-      const o = s[k] === '[' ? readOptional(s, k) : null;
+      const k = skipInlineSpace(t, j, e);
+      const o = t[k] === '[' ? readOptional(t, k, e) : null;
       vals.push(o ? arg(o) : macro.optDefault);
       if (o) j = o.end;
       nargs--;
     }
     for (let a = 0; a < nargs; a++) {
-      const k = skipInlineSpace(s, j);
-      const g = readGroup(s, k);
+      const k = skipInlineSpace(t, j, e);
+      const g = readGroup(t, k, e);
       if (g) {
         vals.push(arg(g));
         j = g.end;
-      } else if (k < s.length) {
-        vals.push(s[k]);
+      } else if (k < e) {
+        vals.push(t[k]);
         j = k + 1;
       }
     }
     const body = macro.body.replace(/#(\d)/g, (_m, d) => vals[Number(d) - 1] ?? '');
-    if (nargs === 0 && macro.optDefault === undefined) j = spaceAfter(j);
-    return [sub(body), j];
+    if (nargs === 0 && macro.optDefault === undefined) j = skipInlineSpace(t, j, e);
+    return island(inline(body, 0, body.length, { ...deeper(st), mapped: false }), j, 'macro');
   }
 
-  if (name in STYLE_SWITCH) return [`<span style="${STYLE_SWITCH[name]}">`, spaceAfter(after), true];
+  if (name in STYLE_SWITCH) {
+    const end = skipInlineSpace(t, after, e);
+    return { html: `<span style="${STYLE_SWITCH[name]}"${st.mapped ? ` data-s="${start}" data-e="${e}"` : ''}>`, end, switchOpen: true };
+  }
 
   if (name === 'color') {
-    const a = readArgs(s, after, 1, s.length, 1);
+    const a = readArgs(t, after, 1, e, 1);
     const col = a.required[0] ? arg(a.required[0]) : '';
-    return [`<span style="color:${cssColor(col)}">`, a.end, true];
+    return { html: `<span style="color:${cssColor(col)}"${st.mapped ? ` data-s="${start}" data-e="${e}"` : ''}>`, end: a.end, switchOpen: true };
   }
 
   if (name in TEXT_STYLE) {
-    const a = readArgs(s, after, 1, s.length, 1);
-    if (!a.required[0]) return ['', a.end];
+    const a = readArgs(t, after, 1, e, 1);
+    if (!a.required[0]) return { html: '', end: a.end };
     const [open, close] = TEXT_STYLE[name];
-    return [open + sub(arg(a.required[0])) + close, a.end];
+    return fmt(open || '<span>', close || '</span>', sub(a.required[0]), a.end);
   }
 
-  if (name in LETTER_ACCENTS && (s[after] === '{' || s[after] === ' ')) return accent(s, after, LETTER_ACCENTS[name]);
+  if (name in LETTER_ACCENTS) {
+    const r = accentAt(t, skipInlineSpace(t, after, e), e, LETTER_ACCENTS[name]);
+    if (r) return island(escapeHtml(r.out), r.end);
+  }
 
   if (name in SYMBOLS) {
     let j = after;
-    if (s[j] === '{' && s[j + 1] === '}') j += 2;
-    else j = spaceAfter(j);
-    return [SYMBOLS[name], j];
+    if (t[j] === '{' && t[j + 1] === '}') j += 2;
+    else j = skipInlineSpace(t, j, e);
+    const sym = SYMBOLS[name];
+    if (sym === '<br>') return { html: st.mapped ? `<br data-s="${start}" data-e="${j}">` : sym, end: j };
+    return island(sym, j);
   }
 
   if (name === 'today') {
     const d = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-    return [d, spaceAfter(after)];
+    return island(d, skipInlineSpace(t, after, e));
   }
 
-  if (IGNORED.has(name)) return ['', spaceAfter(after)];
+  if (IGNORED.has(name)) return { html: '', end: skipInlineSpace(t, after, e) };
 
   if (name in SWALLOW) {
     if (name === 'newcommand' || name === 'renewcommand' || name === 'providecommand') {
-      let j = skipInlineSpace(s, after);
-      if (s[j] === '\\') j += 1 + readCommandName(s, j).length;
-      return ['', readArgs(s, j, name === 'newcommand' ? 2 : 2).end];
+      let j = skipInlineSpace(t, after, e);
+      if (t[j] === '\\') j += 1 + readCommandName(t, j).length;
+      return { html: '', end: readArgs(t, j, 2, e).end };
     }
-    return ['', readArgs(s, after, SWALLOW[name]).end];
+    return { html: '', end: readArgs(t, after, SWALLOW[name], e).end };
   }
 
   if (name === 'hspace' || name === 'hskip' || name === 'kern') {
-    const a = readArgs(s, after, 1);
-    return [' ', a.end];
+    const a = readArgs(t, after, 1, e);
+    return island(' ', a.end);
   }
 
   if (name === 'textcolor') {
-    const a = readArgs(s, after, 2, s.length, 1);
-    if (a.required.length < 2) return ['', a.end];
-    return [`<span style="color:${cssColor(arg(a.required[0]))}">${sub(arg(a.required[1]))}</span>`, a.end];
+    const a = readArgs(t, after, 2, e, 1);
+    if (a.required.length < 2) return { html: '', end: a.end };
+    return fmt(`<span style="color:${cssColor(arg(a.required[0]))}">`, '</span>', sub(a.required[1]), a.end);
   }
   if (name === 'colorbox' || name === 'highlight' || name === 'hl') {
-    const a = readArgs(s, after, name === 'colorbox' ? 2 : 1, s.length, 1);
+    const a = readArgs(t, after, name === 'colorbox' ? 2 : 1, e, 1);
     const content = a.required[a.required.length - 1];
     const col = name === 'colorbox' && a.required[0] ? cssColor(arg(a.required[0])) : 'rgba(255,230,0,.45)';
-    return [content ? `<span style="background:${col}">${sub(arg(content))}</span>` : '', a.end];
+    return content ? fmt(`<span style="background:${col}">`, '</span>', sub(content), a.end) : { html: '', end: a.end };
   }
 
   if (name === 'ensuremath') {
-    const a = readArgs(s, after, 1);
-    return [a.required[0] ? renderKatex(arg(a.required[0]), false, ctx) : '', a.end];
+    const a = readArgs(t, after, 1, e);
+    return island(a.required[0] ? renderKatex(arg(a.required[0]), false, ctx) : '', a.end, 'math');
   }
 
   if (name === 'url' || name === 'nolinkurl' || name === 'path') {
-    const g = readGroup(s, skipInlineSpace(s, after));
-    if (!g) return ['', after];
+    const g = readGroup(t, skipInlineSpace(t, after, e), e);
+    if (!g) return { html: '', end: after };
     const u = arg(g);
-    return [`<a class="url" href="${escapeHtml(u)}" data-external="1">${escapeHtml(u)}</a>`, g.end];
+    return island(`<a class="url" href="${escapeHtml(u)}" data-external="1">${escapeHtml(u)}</a>`, g.end);
   }
   if (name === 'href') {
-    const a = readArgs(s, after, 2);
-    if (a.required.length < 2) return ['', a.end];
-    return [`<a class="url" href="${escapeHtml(arg(a.required[0]))}" data-external="1">${sub(arg(a.required[1]))}</a>`, a.end];
+    const a = readArgs(t, after, 2, e);
+    if (a.required.length < 2) return { html: '', end: a.end };
+    const txt = renderInline(arg(a.required[1]), ctx);
+    return island(`<a class="url" href="${escapeHtml(arg(a.required[0]))}" data-external="1">${txt}</a>`, a.end);
   }
 
   if (name === 'footnote' || name === 'thanks') {
-    const a = readArgs(s, after, 1, s.length, 1);
-    if (!a.required[0]) return ['', a.end];
+    const a = readArgs(t, after, 1, e, 1);
+    if (!a.required[0]) return { html: '', end: a.end };
     const num = ++ctx.footnote;
-    const html = sub(arg(a.required[0]));
-    st.footnotes.push(`<div class="footnote"><sup>${num}</sup> ${html}</div>`);
-    return [`<sup class="fn" title="${escapeHtml(stripTags(html))}">${num}</sup>`, a.end];
+    const g = a.required[0];
+    const body = st.mapped ? region(t, g.innerStart, g.innerEnd, ctx, st.footnotes, 'fn') : sub(g);
+    st.footnotes.push(`<div class="footnote"><sup contenteditable="false">${num}</sup> ${body}</div>`);
+    return island(`<sup class="fn" title="${escapeHtml(stripTags(body))}">${num}</sup>`, a.end, 'fnmark');
   }
 
   if (name === 'verb' || name === 'verb*') {
-    const delim = s[after];
-    const close = s.indexOf(delim, after + 1);
-    const end = close === -1 ? s.length : close;
-    return [`<code>${escapeHtml(s.slice(after + 1, end))}</code>`, end + 1];
+    const delim = t[after];
+    const close = t.indexOf(delim, after + 1);
+    const end = close === -1 || close >= e ? e : close;
+    return island(`<code>${escapeHtml(t.slice(after + 1, end))}</code>`, end + 1);
   }
 
   if (name === 'ref' || name === 'eqref' || name === 'autoref' || name === 'cref' || name === 'Cref' || name === 'pageref' ||
       name === 'nameref' || name === 'vref' || name === 'Autoref' || name === 'cpageref') {
-    const a = readArgs(s, after, 1, s.length, 0);
-    if (!a.required[0]) return ['', a.end];
-    return [renderRef(name, arg(a.required[0]), ctx), a.end];
+    const a = readArgs(t, after, 1, e, 0);
+    if (!a.required[0]) return { html: '', end: a.end };
+    return island(renderRef(name, arg(a.required[0]), ctx), a.end, 'refisl');
   }
 
   if (CITE_COMMANDS.has(name)) {
-    const a = readArgs(s, after, 1, s.length, 2);
-    if (!a.required[0]) return ['', a.end];
-    const opts = a.optional.map((g) => sub(arg(g)));
-    return [renderCite(name, arg(a.required[0]), opts, ctx), a.end];
+    const a = readArgs(t, after, 1, e, 2);
+    if (!a.required[0]) return { html: '', end: a.end };
+    const opts = a.optional.map((g) => renderInline(arg(g), ctx));
+    return island(renderCite(name, arg(a.required[0]), opts, ctx), a.end, 'refisl');
   }
 
   if (name === 'includegraphics') {
-    const a = readArgs(s, after, 1, s.length, 1);
-    if (!a.required[0]) return ['', a.end];
-    return [renderGraphic(arg(a.required[0]).trim(), a.optional[0] ? arg(a.optional[0]) : '', ctx), a.end];
+    const a = readArgs(t, after, 1, e, 1);
+    if (!a.required[0]) return { html: '', end: a.end };
+    return island(renderGraphic(arg(a.required[0]).trim(), a.optional[0] ? arg(a.optional[0]) : '', ctx), a.end);
   }
 
   if (name === 'begin') {
     // Inline environments inside paragraphs/cells (e.g. a tabular in a cell).
-    const g = readGroup(s, after);
+    const g = readGroup(t, after, e);
     if (g) {
       const env = arg(g).trim();
-      const f = findEnvEnd(s, g.end, env);
-      const innerEnd = f ? f.innerEnd : s.length;
-      const end = f ? f.end : s.length;
-      const body = s.slice(g.end, innerEnd);
+      const f = findEnvEnd(t, g.end, env, e);
+      const innerEnd = f ? f.innerEnd : e;
+      const end = f ? f.end : e;
       if (MATH_ENVS.has(env)) {
         const base = env.replace('*', '');
+        const body = t.slice(g.end, innerEnd);
         const src = ['align', 'gather', 'alignat'].includes(base) ? `\\begin{${base}*}${body}\\end{${base}*}` : body;
-        return [renderKatex(src, true, ctx), end];
+        return island(renderKatex(src, true, ctx), end, 'math');
       }
-      if (env === 'tabular' || env === 'tabular*' || env === 'tabularx' || env === 'array') return [renderTabularSource(env, body, ctx), end];
-      if (env === 'center') return [`<span class="centerline">${sub(body)}</span>`, end];
-      return [sub(body), end];
+      if (env === 'tabular' || env === 'tabular*' || env === 'tabularx' || env === 'array') {
+        return island(renderTabular(t, g.end, innerEnd, env, ctx, st.footnotes, false), end);
+      }
+      const inner = inline(t, g.end, innerEnd, { ...deeper(st), mapped: false });
+      return island(env === 'center' ? `<span class="centerline">${inner}</span>` : inner, end);
     }
   }
   if (name === 'end') {
-    const g = readGroup(s, after);
-    return ['', g ? g.end : after];
+    const g = readGroup(t, after, e);
+    return { html: '', end: g ? g.end : after };
   }
 
   if (name === 'multicolumn' || name === 'multirow') {
-    const a = readArgs(s, after, 3);
+    const a = readArgs(t, after, 3, e);
     const content = a.required[2];
-    return [content ? sub(arg(content)) : '', a.end];
+    return content ? fmt('<span>', '</span>', sub(content), a.end) : { html: '', end: a.end };
   }
 
-  if (name === 'item') return ['• ', spaceAfter(after)];
+  if (name === 'item') return island('• ', skipInlineSpace(t, after, e));
 
-  // Unknown command: render its arguments' text, dimmed, so content is not lost.
-  const a = readArgs(s, after, 4, s.length, 1);
+  // Unknown command: keep its argument text visible (and editable), dimmed.
+  const a = readArgs(t, after, 4, e, 1);
   if (a.required.length === 0) {
-    return [`<span class="unknown-cmd" title="Unrendered command">\\${escapeHtml(name)}</span>`, spaceAfter(a.end)];
+    return island(`<span class="unknown-cmd" title="Unrendered command">\\${escapeHtml(name)}</span>`, skipInlineSpace(t, a.end, e));
   }
-  const inner = a.required.map((g) => sub(arg(g))).join(' ');
-  return [`<span class="unknown-cmd-args" title="\\${escapeHtml(name)}">${inner}</span>`, a.end];
+  const inner = a.required.map((g) => sub(g)).join(' ');
+  return fmt(`<span class="unknown-cmd-args" title="\\${escapeHtml(name)}">`, '</span>', inner, a.end);
 }
 
 function cssColor(c: string): string {
@@ -550,6 +642,7 @@ export function stripTags(html: string): string {
   return html
     .replace(/<annotation[\s\S]*?<\/annotation>/g, '')
     .replace(/<[^>]+>/g, '')
+    .replace(/\u200b/g, '')
     .replace(/&nbsp;/g, ' ')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
@@ -653,6 +746,11 @@ function parseKeyVals(opts: string): Record<string, string> {
   return out;
 }
 
+/** A graphic inside a float: clicking it edits the \includegraphics command. */
+function graphicIsland(path: string, opts: string, ctx: Ctx): string {
+  return renderGraphic(path, opts, ctx);
+}
+
 export function renderGraphic(path: string, opts: string, ctx: Ctx): string {
   const kv = parseKeyVals(opts);
   const styles: string[] = [];
@@ -734,77 +832,87 @@ interface RowRules {
   color?: string;
 }
 
-function takeRules(row: string): { rest: string; rules: RowRules } {
+/** Consumes rule commands (\hline, \midrule...) at the start of a row. Returns where the cells begin. */
+function takeRules(t: string, s: number, e: number): { restStart: number; rules: RowRules } {
   const rules: RowRules = { top: 0, partial: [] };
-  let s = row;
-  while (true) {
-    s = s.replace(/^\s+/, '');
-    if (!s.startsWith('\\')) break;
-    const name = readCommandName(s, 0);
+  let i = s;
+  while (i < e) {
+    while (i < e && /\s/.test(t[i])) i++;
+    if (t[i] === '%') {
+      i = skipComment(t, i, e);
+      continue;
+    }
+    if (t[i] !== '\\') break;
+    const name = readCommandName(t, i);
     if (!RULES.includes(name)) break;
-    let j = 1 + name.length;
+    let j = i + 1 + name.length;
     if (name === 'cline' || name === 'cmidrule' || name === 'cdashline') {
-      if (s[skipInlineSpace(s, j)] === '(') {
-        const close = s.indexOf(')', j);
-        j = close + 1;
+      const k = skipInlineSpace(t, j, e);
+      if (t[k] === '(') {
+        const close = t.indexOf(')', k);
+        if (close !== -1 && close < e) j = close + 1;
       }
-      const a = readArgs(s, j, 1, s.length, 1);
-      const range = a.required[0] ? s.slice(a.required[0].innerStart, a.required[0].innerEnd) : '';
+      const a = readArgs(t, j, 1, e, 1);
+      const range = a.required[0] ? t.slice(a.required[0].innerStart, a.required[0].innerEnd) : '';
       const m = /(\d+)\s*-\s*(\d+)/.exec(range);
       if (m) rules.partial.push({ from: Number(m[1]) - 1, to: Number(m[2]) - 1, w: 1 });
       j = a.end;
     } else if (name === 'rowcolor') {
-      const a = readArgs(s, j, 1, s.length, 1);
-      if (a.required[0]) rules.color = cssColor(s.slice(a.required[0].innerStart, a.required[0].innerEnd));
+      const a = readArgs(t, j, 1, e, 1);
+      if (a.required[0]) rules.color = cssColor(t.slice(a.required[0].innerStart, a.required[0].innerEnd));
       j = a.end;
     } else if (name === 'specialrule' || name === 'noalign' || name === 'hhline') {
-      j = readArgs(s, j, name === 'specialrule' ? 3 : 1).end;
+      j = readArgs(t, j, name === 'specialrule' ? 3 : 1, e).end;
       rules.top = Math.max(rules.top, 1);
     } else if (name === 'addlinespace') {
-      j = readArgs(s, j, 0, s.length, 1).end;
+      j = readArgs(t, j, 0, e, 1).end;
     } else if (name === 'midrule' || name === 'hline' || name === 'hdashline') {
-      if (name === 'midrule') j = readArgs(s, j, 0, s.length, 1).end;
+      if (name === 'midrule') j = readArgs(t, j, 0, e, 1).end;
       rules.top += 1;
     } else if (name === 'toprule' || name === 'bottomrule') {
-      j = readArgs(s, j, 0, s.length, 1).end;
+      j = readArgs(t, j, 0, e, 1).end;
       rules.top += 2;
     }
-    s = s.slice(j);
+    i = j;
   }
-  return { rest: s, rules };
+  return { restStart: i, rules };
 }
 
-/** Renders a tabular environment given its env name and full body (args included). */
-export function renderTabularSource(env: string, body: string, ctx: Ctx, footnotes: string[] = []): string {
-  body = stripComments(body);
-  let j = 0;
-  if (env === 'longtable') j = readArgs(body, j, 0, body.length, 1).end;
-  if (env === 'tabular*' || env === 'tabularx') j = readArgs(body, j, 1, body.length, 0).end;
-  j = skipInlineSpace(body, j);
-  if (body[j] === '[') j = readOptional(body, j)?.end ?? j;
-  const specGroup = readGroup(body, skipInlineSpace(body, j));
-  const spec = specGroup ? body.slice(specGroup.innerStart, specGroup.innerEnd) : '';
-  const content = specGroup ? body.slice(specGroup.end) : body;
+/**
+ * Renders a tabular-like environment whose body (column spec included) is
+ * t[s, e). When `mapped`, each cell is an editable region.
+ */
+export function renderTabular(t: string, s: number, e: number, env: string, ctx: Ctx, footnotes: string[] = [], mapped = true): string {
+  let j = s;
+  if (env === 'longtable') j = readArgs(t, j, 0, e, 1).end;
+  if (env === 'tabular*' || env === 'tabularx') j = readArgs(t, j, 1, e, 0).end;
+  j = skipInlineSpace(t, j, e);
+  if (t[j] === '[') j = readOptional(t, j, e)?.end ?? j;
+  const specGroup = readGroup(t, skipInlineSpace(t, j, e), e);
+  const spec = specGroup ? t.slice(specGroup.innerStart, specGroup.innerEnd) : '';
+  const contentStart = specGroup ? specGroup.end : s;
   const cols = parseColSpec(spec);
-  const cellHtml = (src: string) => inline(src, { ctx, depth: 1, footnotes });
+  const cellHtml = (a: number, b: number) =>
+    mapped ? region(t, a, b, ctx, footnotes, 'cell') : inline(t, a, b, { ctx, depth: 1, footnotes, mapped: false });
 
-  const rawRows = splitTopLevel(content, '\\\\').map((r) => r.text);
-  const rows: { cells: string[]; rules: RowRules; bottom: number }[] = [];
+  const rawRows = splitTopLevel(t.slice(contentStart, e), '\\\\').map((r) => ({ start: contentStart + r.start, end: contentStart + r.end }));
+  const rows: { cells: { start: number; end: number }[]; rules: RowRules; bottom: number }[] = [];
   let caption = '';
   for (const raw of rawRows) {
-    const { rest, rules } = takeRules(raw);
-    const trimmed = rest.trim();
-    if (/^\\caption\b/.test(trimmed)) {
-      const a = readArgs(trimmed, 8, 1, trimmed.length, 1);
-      if (a.required[0]) caption = cellHtml(trimmed.slice(a.required[0].innerStart, a.required[0].innerEnd));
+    const { restStart, rules } = takeRules(t, raw.start, raw.end);
+    const tr = trimRange(t, restStart, raw.end);
+    if (t.startsWith('\\caption', tr.start) && !isLetter(t[tr.start + 8])) {
+      const a = readArgs(t, tr.start + 8, 1, raw.end, 1);
+      if (a.required[0]) caption = cellHtml(a.required[0].innerStart, a.required[0].innerEnd);
       continue;
     }
-    if (trimmed === '') {
+    if (tr.start >= tr.end) {
       // Rules after the last \\ form the bottom border of the table.
       if (rows.length) rows[rows.length - 1].bottom += rules.top;
       continue;
     }
-    rows.push({ cells: splitTopLevel(rest, '&').map((c) => c.text), rules, bottom: 0 });
+    const cells = splitTopLevel(t.slice(restStart, raw.end), '&').map((c) => ({ start: restStart + c.start, end: restStart + c.end }));
+    rows.push({ cells, rules, bottom: 0 });
   }
 
   const occupied: number[] = [];
@@ -814,36 +922,40 @@ export function renderTabularSource(env: string, body: string, ctx: Ctx, footnot
     const top = row.rules.top;
     html += `<tr${row.rules.color ? ` style="background:${row.rules.color}"` : ''}>`;
     let col = 0;
-    for (const cellSrc of row.cells) {
+    for (const cell of row.cells) {
       if (startOccupied[col] > 0) {
         // Placeholder cell under a \multirow from an earlier row.
         col++;
         continue;
       }
-      let src = cellSrc.trim();
+      let { start: a, end: b } = trimRange(t, cell.start, cell.end);
       let span = 1;
       let rowspan = 1;
       let spec: ColSpec | undefined = cols[col];
-      const mc = /^\\multicolumn\s*\{\s*(\d+)\s*\}/.exec(src);
+      const mc = /^\\multicolumn\s*\{\s*(\d+)\s*\}/.exec(t.slice(a, b));
       if (mc) {
-        const a = readArgs(src, '\\multicolumn'.length, 3);
+        const args = readArgs(t, a + '\\multicolumn'.length, 3, b);
         span = Number(mc[1]);
-        if (a.required.length === 3) {
-          const cs = parseColSpec(src.slice(a.required[1].innerStart, a.required[1].innerEnd));
+        if (args.required.length === 3) {
+          const cs = parseColSpec(t.slice(args.required[1].innerStart, args.required[1].innerEnd));
           if (cs[0]) spec = cs[0];
-          src = src.slice(a.required[2].innerStart, a.required[2].innerEnd);
+          a = args.required[2].innerStart;
+          b = args.required[2].innerEnd;
         }
       }
-      const mr = /^\\multirow\s*\{\s*(\d+)\s*\}/.exec(src);
+      const mr = /^\\multirow\s*\{\s*(\d+)\s*\}/.exec(t.slice(a, b));
       if (mr) {
-        const a = readArgs(src, '\\multirow'.length, 3, src.length, 2);
+        const args = readArgs(t, a + '\\multirow'.length, 3, b, 2);
         rowspan = Number(mr[1]);
-        if (a.required.length === 3) src = src.slice(a.required[2].innerStart, a.required[2].innerEnd);
+        if (args.required.length === 3) {
+          a = args.required[2].innerStart;
+          b = args.required[2].innerEnd;
+        }
         for (let k = 0; k < span; k++) occupied[col + k] = rowspan;
       }
       const styles: string[] = [];
       const align = spec?.align ?? 'l';
-      styles.push(`text-align:${align === 'l' ? 'left' : align === 'r' ? 'right' : align === 'c' ? 'center' : 'left'}`);
+      styles.push(`text-align:${align === 'r' ? 'right' : align === 'c' ? 'center' : 'left'}`);
       if (spec?.width) styles.push(`width:${spec.width}`);
       const bl = col === 0 ? cols[0]?.borderLeft ?? 0 : 0;
       const br = (mc ? spec?.borderRight : cols[col + span - 1]?.borderRight) ?? 0;
@@ -854,7 +966,7 @@ export function renderTabularSource(env: string, body: string, ctx: Ctx, footnot
       for (const p of row.rules.partial) if (col >= p.from && col <= p.to) topW = Math.max(topW, p.w);
       if (topW) styles.push(`border-top:${topW}px solid var(--rule)`);
       if (row.bottom) styles.push(`border-bottom:${row.bottom}px solid var(--rule)`);
-      html += `<td${span > 1 ? ` colspan="${span}"` : ''}${rowspan > 1 ? ` rowspan="${rowspan}"` : ''} style="${styles.join(';')}">${cellHtml(src)}</td>`;
+      html += `<td${span > 1 ? ` colspan="${span}"` : ''}${rowspan > 1 ? ` rowspan="${rowspan}"` : ''} style="${styles.join(';')}">${mc || mr ? cellHtml(a, b) : cellHtml(cell.start, cell.end)}</td>`;
       col += span;
     }
     html += '</tr>';
@@ -882,7 +994,7 @@ function renderFloatBody(t: string, s: number, e: number, ctx: Ctx, footnotes: s
   const rows: string[][] = [[]];
   let text = '';
   const flushText = () => {
-    if (text.trim()) rows[rows.length - 1].push(`<span class="float-text">${inline(stripComments(text), { ctx, depth: 1, footnotes })}</span>`);
+    if (text.trim()) rows[rows.length - 1].push(`<span class="float-text">${renderInline(text, ctx, footnotes)}</span>`);
     text = '';
   };
   const newRow = () => {
@@ -921,7 +1033,7 @@ function renderFloatBody(t: string, s: number, e: number, ctx: Ctx, footnotes: s
       let innerE: number;
       if (name === 'subfloat') {
         const a = readArgs(t, after, 1, e, 2);
-        const cap = a.optional[0] ? inline(stripComments(t.slice(a.optional[0].innerStart, a.optional[0].innerEnd)), { ctx, depth: 1, footnotes }) : '';
+        const cap = a.optional[0] ? region(t, a.optional[0].innerStart, a.optional[0].innerEnd, ctx, footnotes, 'cap') : '';
         const content = a.required[0];
         const inner = content ? renderFloatBody(t, content.innerStart, content.innerEnd, ctx, footnotes, (h) => h) : '';
         rows[rows.length - 1].push(`<div class="subfig">${inner}<div class="subcap">(${letter}) ${cap}</div></div>`);
@@ -942,7 +1054,7 @@ function renderFloatBody(t: string, s: number, e: number, ctx: Ctx, footnotes: s
     if (name === 'includegraphics') {
       flushText();
       const a = readArgs(t, after, 1, e, 1);
-      if (a.required[0]) rows[rows.length - 1].push(renderGraphic(t.slice(a.required[0].innerStart, a.required[0].innerEnd).trim(), a.optional[0] ? t.slice(a.optional[0].innerStart, a.optional[0].innerEnd) : '', ctx));
+      if (a.required[0]) rows[rows.length - 1].push(graphicIsland(t.slice(a.required[0].innerStart, a.required[0].innerEnd).trim(), a.optional[0] ? t.slice(a.optional[0].innerStart, a.optional[0].innerEnd) : '', ctx));
       i = a.end;
       continue;
     }
@@ -950,7 +1062,7 @@ function renderFloatBody(t: string, s: number, e: number, ctx: Ctx, footnotes: s
       const a = readArgs(t, after, 1, e, 1);
       if (a.required[0]) {
         newRow();
-        rows[rows.length - 1].push(captionFn(inline(stripComments(t.slice(a.required[0].innerStart, a.required[0].innerEnd)), { ctx, depth: 1, footnotes })));
+        rows[rows.length - 1].push(captionFn(region(t, a.required[0].innerStart, a.required[0].innerEnd, ctx, footnotes, 'cap')));
         rows.push([]);
       }
       i = a.end;
@@ -965,7 +1077,7 @@ function renderFloatBody(t: string, s: number, e: number, ctx: Ctx, footnotes: s
         const end = f ? f.end : e;
         flushText();
         if (['tabular', 'tabular*', 'tabularx', 'longtable', 'array'].includes(env)) {
-          rows[rows.length - 1].push(renderTabularSource(env, t.slice(g.end, innerEnd), ctx, footnotes));
+          rows[rows.length - 1].push(renderTabular(t, g.end, innerEnd, env, ctx, footnotes));
         } else if (env === 'minipage') {
           const a = readArgs(t, g.end, 1, innerEnd, 1);
           const w = a.required[0] ? texLengthToCss(t.slice(a.required[0].innerStart, a.required[0].innerEnd)) : undefined;
@@ -973,7 +1085,7 @@ function renderFloatBody(t: string, s: number, e: number, ctx: Ctx, footnotes: s
         } else if (env === 'center' || env === 'adjustbox' || env === 'small' || env === 'footnotesize' || env === 'scriptsize' || env === 'resizebox') {
           rows[rows.length - 1].push(renderFloatBody(t, readArgs(t, g.end, env === 'adjustbox' ? 1 : 0, innerEnd).end, innerEnd, ctx, footnotes, captionFn));
         } else if (MATH_ENVS.has(env)) {
-          rows[rows.length - 1].push(renderKatex(t.slice(g.end, innerEnd), true, ctx));
+          rows[rows.length - 1].push(`<span class="isl math" contenteditable="false" data-start="${i}" data-end="${end}">${renderKatex(t.slice(g.end, innerEnd), true, ctx)}</span>`);
         } else {
           rows[rows.length - 1].push(renderFloatBody(t, g.end, innerEnd, ctx, footnotes, captionFn));
         }
@@ -1025,9 +1137,12 @@ function renderFloatBody(t: string, s: number, e: number, ctx: Ctx, footnotes: s
 // ---------------------------------------------------------------------------
 // Blocks
 
-function attrs(b: { start: number; end: number }, kind: string, extra = ''): string {
-  return `class="blk blk-${kind}${extra ? ' ' + extra : ''}" data-start="${b.start}" data-end="${b.end}"`;
+/** Wrapper attributes for a block. Blocks without editable text are marked contenteditable=false. */
+function attrs(b: { start: number; end: number }, kind: string, extra = '', editable = true): string {
+  return `class="blk blk-${kind}${extra ? ' ' + extra : ''}" data-start="${b.start}" data-end="${b.end}"${editable ? '' : ' contenteditable="false"'}`;
 }
+
+const NE = 'contenteditable="false"';
 
 export function renderBlocks(blocks: Block[], ctx: Ctx): string {
   return blocks.map((b) => renderBlock(b, ctx)).join('');
@@ -1054,36 +1169,35 @@ const HEADING_TAG: Record<number, string> = { [-1]: 'h1', 0: 'h1', 1: 'h2', 2: '
 
 function renderBlockInner(b: Block, ctx: Ctx, footnotes: string[]): string {
   const t = ctx.text;
-  const inl = (s: number, e: number) => inline(stripComments(t.slice(s, e)), { ctx, depth: 0, footnotes });
   switch (b.kind) {
     case 'preamble':
-      return `<div ${attrs(b, 'preamble')}>${renderPreambleSummary(ctx)}</div>`;
+      return `<div ${attrs(b, 'preamble', '', false)}>${renderPreambleSummary(ctx)}</div>`;
     case 'paragraph':
-      return `<div ${attrs(b, 'paragraph')}><p${b.continuation ? ' class="cont"' : ''}>${inl(b.start, b.end)}</p></div>`;
+      return `<div ${attrs(b, 'paragraph')}>${region(t, b.start, b.end, ctx, footnotes, 'p', 'p', b.continuation ? 'cont' : '')}</div>`;
     case 'comment':
-      return `<div ${attrs(b, 'comment')}><span class="comment">${escapeHtml(t.slice(b.start, b.end))}</span></div>`;
+      return `<div ${attrs(b, 'comment', '', false)}><span class="comment">${escapeHtml(t.slice(b.start, b.end))}</span></div>`;
     case 'heading': {
       const num = ctx.headingNums.get(b.start);
       const tag = HEADING_TAG[b.level!] ?? 'h5';
       let prefix = '';
-      if (num) prefix = b.level === 0 ? `<span class="secnum chapnum">Chapter ${num}</span>` : `<span class="secnum">${num}</span>`;
-      return `<div ${attrs(b, 'heading')}><${tag}>${prefix}${inl(b.arg!.start, b.arg!.end)}</${tag}></div>`;
+      if (num) prefix = b.level === 0 ? `<span class="secnum chapnum" ${NE}>Chapter ${num}</span>` : `<span class="secnum" ${NE}>${num}</span>`;
+      return `<div ${attrs(b, 'heading')}><${tag}>${prefix}${region(t, b.arg!.start, b.arg!.end, ctx, footnotes, 'h')}</${tag}></div>`;
     }
     case 'math': {
       const src = ctx.mathSrc.get(b.start) ?? stripComments(t.slice(b.innerStart!, b.innerEnd!));
-      return `<div ${attrs(b, 'math')}>${renderKatex(src, true, ctx)}</div>`;
+      return `<div ${attrs(b, 'math', '', false)}>${renderKatex(src, true, ctx)}</div>`;
     }
     case 'figure':
     case 'table':
-      return `<div ${attrs(b, b.kind)}>${renderFloat(b, ctx, footnotes)}</div>`;
+      return `<div ${attrs(b, b.kind, '', false)}>${renderFloat(b, ctx, footnotes)}</div>`;
     case 'tabular':
-      return `<div ${attrs(b, 'tabular')}><div class="float-row">${renderTabularSource(b.name!, t.slice(b.innerStart!, b.innerEnd!), ctx, footnotes)}</div></div>`;
+      return `<div ${attrs(b, 'tabular', '', false)}><div class="float-row">${renderTabular(t, b.innerStart!, b.innerEnd!, b.name!, ctx, footnotes)}</div></div>`;
     case 'verbatim': {
       let s = b.innerStart!;
       if (b.name === 'lstlisting' || b.name === 'minted') s = readArgs(t, s, b.name === 'minted' ? 1 : 0, b.innerEnd!, 1).end;
       const code = t.slice(s, b.innerEnd!).replace(/^\n/, '');
-      if (b.name === 'comment') return `<div ${attrs(b, 'comment')}><span class="comment">${escapeHtml(t.slice(b.start, b.end))}</span></div>`;
-      return `<div ${attrs(b, 'verbatim')}><pre>${escapeHtml(code)}</pre></div>`;
+      if (b.name === 'comment') return `<div ${attrs(b, 'comment', '', false)}><span class="comment">${escapeHtml(t.slice(b.start, b.end))}</span></div>`;
+      return `<div ${attrs(b, 'verbatim', '', false)}><pre>${escapeHtml(code)}</pre></div>`;
     }
     case 'list':
       return `<div ${attrs(b, 'list')}>${renderList(b, ctx)}</div>`;
@@ -1092,10 +1206,18 @@ function renderBlockInner(b: Block, ctx: Ctx, footnotes: string[]): string {
     case 'command':
       return renderCommand(b, ctx, footnotes);
   }
-  return `<div ${attrs(b, 'unknown')}><pre>${escapeHtml(t.slice(b.start, b.end))}</pre></div>`;
+  return `<div ${attrs(b, 'unknown', '', false)}><pre>${escapeHtml(t.slice(b.start, b.end))}</pre></div>`;
 }
 
 let listDepth = 0;
+
+/** An item's blocks, or an empty editable paragraph so the caret can go into a new item. */
+function itemBody(it: ListItem, ctx: Ctx): string {
+  if (it.children.length) return renderBlocks(it.children, ctx);
+  const at = it.contentStart;
+  const prefix = /\s/.test(ctx.text[at - 1] ?? '') ? '' : ' ';
+  return `<div class="blk blk-paragraph" data-start="${at}" data-end="${at}"><p class="ed" contenteditable="true" data-region="p" data-s="${at}" data-e="${at}"${prefix ? ` data-prefix="${prefix}"` : ''}><br></p></div>`;
+}
 function renderList(b: Block, ctx: Ctx): string {
   const t = ctx.text;
   listDepth++;
@@ -1103,7 +1225,7 @@ function renderList(b: Block, ctx: Ctx): string {
     const items = b.items ?? [];
     if (b.name === 'description') {
       return `<dl class="description">${items
-        .map((it) => `<div class="item" data-start="${it.start}" data-end="${it.end}"><dt>${it.label ? renderInline(t.slice(it.label.start, it.label.end), ctx) : ''}</dt><dd>${renderBlocks(it.children, ctx)}</dd></div>`)
+        .map((it) => `<div class="item" data-start="${it.start}" data-end="${it.end}"><dt ${NE}>${it.label ? renderInline(t.slice(it.label.start, it.label.end), ctx) : ''}</dt><dd>${itemBody(it, ctx)}</dd></div>`)
         .join('')}</dl>`;
     }
     const ordered = b.name === 'enumerate';
@@ -1111,8 +1233,8 @@ function renderList(b: Block, ctx: Ctx): string {
     const tag = ordered ? 'ol' : 'ul';
     const lis = items
       .map((it) => {
-        const custom = it.label ? `<span class="item-label">${renderInline(t.slice(it.label.start, it.label.end), ctx)}</span>` : '';
-        return `<li class="item${custom ? ' custom' : ''}" data-start="${it.start}" data-end="${it.end}">${custom}${renderBlocks(it.children, ctx)}</li>`;
+        const custom = it.label ? `<span class="item-label" ${NE}>${renderInline(t.slice(it.label.start, it.label.end), ctx)}</span>` : '';
+        return `<li class="item${custom ? ' custom' : ''}" data-start="${it.start}" data-end="${it.end}">${custom}${itemBody(it, ctx)}</li>`;
       })
       .join('');
     return `<${tag} class="${b.name}"${ordered ? ` type="${type}"` : ''}>${lis}</${tag}>`;
@@ -1131,7 +1253,7 @@ function renderEnv(b: Block, ctx: Ctx): string {
     return g ? renderInline(t.slice(g.innerStart, g.innerEnd), ctx) : '';
   };
   if (name === 'abstract') {
-    return `<div ${attrs(b, 'env', 'abstract')}><div class="abstract-title">Abstract</div>${kids()}</div>`;
+    return `<div ${attrs(b, 'env', 'abstract')}><div class="abstract-title" ${NE}>Abstract</div>${kids()}</div>`;
   }
   if (name === 'thebibliography') {
     const items = (b.items ?? [])
@@ -1143,17 +1265,17 @@ function renderEnv(b: Block, ctx: Ctx): string {
         return `<li class="bib-item" id="bib-${escapeHtml(key)}" data-start="${it.start}" data-end="${it.end}"><span class="bib-num">[${num}]</span> ${body}</li>`;
       })
       .join('');
-    return `<div ${attrs(b, 'env', 'bibliography')}><h2 class="bib-title">References</h2><ol class="bib-list">${items}</ol></div>`;
+    return `<div ${attrs(b, 'env', 'bibliography', false)}><h2 class="bib-title">References</h2><ol class="bib-list">${items}</ol></div>`;
   }
   const th = ctx.theorems.get(name);
   if (th) {
     const num = ctx.theoremNums.get(b.start);
     const o = opt();
-    return `<div ${attrs(b, 'env', 'theorem')}><span class="thm-head">${escapeHtml(th.title)}${num ? ' ' + num : ''}${o ? ` (${o})` : ''}.</span>${kids()}</div>`;
+    return `<div ${attrs(b, 'env', 'theorem')}><span class="thm-head" ${NE}>${escapeHtml(th.title)}${num ? ' ' + num : ''}${o ? ` (${o})` : ''}.</span>${kids()}</div>`;
   }
   if (name === 'proof') {
     const o = opt();
-    return `<div ${attrs(b, 'env', 'proof')}><span class="thm-head proof-head">${o || 'Proof'}.</span>${kids()}<span class="qed">∎</span></div>`;
+    return `<div ${attrs(b, 'env', 'proof')}><span class="thm-head proof-head" ${NE}>${o || 'Proof'}.</span>${kids()}<span class="qed" ${NE}>∎</span></div>`;
   }
   if (name === 'center' || name === 'flushleft' || name === 'flushright') {
     return `<div ${attrs(b, 'env', name)}>${kids()}</div>`;
@@ -1162,42 +1284,42 @@ function renderEnv(b: Block, ctx: Ctx): string {
     return `<div ${attrs(b, 'env', 'quote')}>${kids()}</div>`;
   }
   if (name === 'minipage') return `<div ${attrs(b, 'env', 'minipage')}>${kids()}</div>`;
-  return `<div ${attrs(b, 'env', 'generic')}><div class="env-name">${escapeHtml(name)}</div>${kids()}</div>`;
+  return `<div ${attrs(b, 'env', 'generic')}><div class="env-name" ${NE}>${escapeHtml(name)}</div>${kids()}</div>`;
 }
 
 function renderCommand(b: Block, ctx: Ctx, footnotes: string[]): string {
   const t = ctx.text;
   const name = b.name!;
-  const chip = (label: string, cls = '') => `<div ${attrs(b, 'command', cls)}><span class="chip">${label}</span></div>`;
+  const chip = (label: string, cls = '') => `<div ${attrs(b, 'command', cls, false)}><span class="chip">${label}</span></div>`;
   switch (name) {
     case 'maketitle':
-      return `<div ${attrs(b, 'command', 'titleblock')}>${renderTitle(ctx, footnotes)}</div>`;
+      return `<div ${attrs(b, 'command', 'titleblock', false)}>${renderTitle(ctx, footnotes)}</div>`;
     case 'tableofcontents':
-      return `<div ${attrs(b, 'command', 'toc')}><h2 class="toc-title">Contents</h2>${ctx.headings
+      return `<div ${attrs(b, 'command', 'toc', false)}><h2 class="toc-title">Contents</h2>${ctx.headings
         .filter((h) => h.level <= 2)
         .map((h) => `<div class="toc-entry toc-l${h.level}"><a class="ref" data-goto="${h.start}"><span class="toc-num">${h.num}</span> ${renderInline(t.slice(h.title.start, h.title.end), ctx)}</a></div>`)
         .join('')}</div>`;
     case 'bibliography':
     case 'printbibliography':
-      return `<div ${attrs(b, 'command', 'bibliography')}>${renderBibList(ctx)}</div>`;
+      return `<div ${attrs(b, 'command', 'bibliography', false)}>${renderBibList(ctx)}</div>`;
     case 'newpage':
     case 'clearpage':
     case 'cleardoublepage':
     case 'pagebreak':
-      return `<div ${attrs(b, 'command', 'pagebreak')}><span class="chip">page break</span></div>`;
+      return `<div ${attrs(b, 'command', 'pagebreak', false)}><span class="chip">page break</span></div>`;
     case 'appendix':
       return chip('Appendix', 'appendix');
     case 'input':
     case 'include': {
       const file = b.arg ? t.slice(b.arg.start, b.arg.end).trim() : '';
-      return `<div ${attrs(b, 'command', 'input')}><span class="chip">\\${name}{${escapeHtml(file)}} <a class="open-file" data-file="${escapeHtml(file)}">open</a></span></div>`;
+      return `<div ${attrs(b, 'command', 'input', false)}><span class="chip">\\${name}{${escapeHtml(file)}} <a class="open-file" data-file="${escapeHtml(file)}">open</a></span></div>`;
     }
     case 'vspace':
     case 'vfill':
     case 'bigskip':
     case 'medskip':
     case 'smallskip':
-      return `<div ${attrs(b, 'command', 'spacer')}></div>`;
+      return `<div ${attrs(b, 'command', 'spacer', false)}></div>`;
     default: {
       const src = t.slice(b.start, b.end);
       const short = src.length > 80 ? src.slice(0, 77) + '…' : src;
@@ -1222,16 +1344,22 @@ function renderPreambleSummary(ctx: Ctx): string {
 function renderTitle(ctx: Ctx, footnotes: string[]): string {
   const t = ctx.text;
   const { title, author, date } = ctx.meta;
-  const inl = (r: { start: number; end: number }) => inline(stripComments(t.slice(r.start, r.end)), { ctx, depth: 0, footnotes });
+  const reg = (s: number, e: number) => region(t, s, e, ctx, footnotes, 'title');
   let html = '';
-  if (title) html += `<div class="doc-title">${inl(title)}</div>`;
+  if (title) html += `<div class="doc-title">${reg(title.start, title.end)}</div>`;
   if (author) {
-    const src = stripComments(t.slice(author.start, author.end));
-    const authors = src.split(/\\and\b/).map((a) => `<div class="doc-author">${inline(a, { ctx, depth: 0, footnotes })}</div>`);
-    html += `<div class="doc-authors">${authors.join('')}</div>`;
+    // One region per author, split at top-level \and.
+    const parts: { start: number; end: number }[] = [];
+    let last = author.start;
+    for (const m of t.slice(author.start, author.end).matchAll(/\\and\b/g)) {
+      parts.push({ start: last, end: author.start + m.index! });
+      last = author.start + m.index! + m[0].length;
+    }
+    parts.push({ start: last, end: author.end });
+    html += `<div class="doc-authors">${parts.map((p) => `<div class="doc-author">${reg(p.start, p.end)}</div>`).join('')}</div>`;
   }
-  const d = date ? inl(date) : new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-  if (d.trim()) html += `<div class="doc-date">${d}</div>`;
+  if (date) html += `<div class="doc-date">${reg(date.start, date.end)}</div>`;
+  else html += `<div class="doc-date">${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</div>`;
   return html || '<span class="chip">\\maketitle (no \\title set)</span>';
 }
 

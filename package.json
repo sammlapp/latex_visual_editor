@@ -5,9 +5,20 @@
   "version": "0.1.0",
   "publisher": "sammlapp",
   "license": "MIT",
-  "engines": { "vscode": "^1.90.0" },
-  "categories": ["Visualization", "Other"],
-  "keywords": ["latex", "tex", "wysiwyg", "visual", "katex"],
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "latex",
+    "tex",
+    "wysiwyg",
+    "visual",
+    "katex"
+  ],
   "main": "./dist/extension.js",
   "activationEvents": [],
   "contributes": {
@@ -15,27 +26,67 @@
       {
         "viewType": "latexVisual.editor",
         "displayName": "LaTeX Visual Editor",
-        "selector": [{ "filenamePattern": "*.tex" }],
+        "selector": [
+          {
+            "filenamePattern": "*.tex"
+          }
+        ],
         "priority": "option"
       }
     ],
     "commands": [
-      { "command": "latexVisual.open", "title": "Open Visual Editor", "category": "LaTeX", "icon": "$(preview)" },
-      { "command": "latexVisual.openToSide", "title": "Open Visual Editor to the Side", "category": "LaTeX", "icon": "$(open-preview)" },
-      { "command": "latexVisual.showSource", "title": "Show LaTeX Source", "category": "LaTeX", "icon": "$(go-to-file)" }
+      {
+        "command": "latexVisual.open",
+        "title": "Open Visual Editor",
+        "category": "LaTeX",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "latexVisual.openToSide",
+        "title": "Open Visual Editor to the Side",
+        "category": "LaTeX",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "latexVisual.showSource",
+        "title": "Show LaTeX Source",
+        "category": "LaTeX",
+        "icon": "$(go-to-file)"
+      }
     ],
     "menus": {
       "editor/title": [
-        { "command": "latexVisual.openToSide", "when": "resourceExtname == .tex && activeCustomEditorId != latexVisual.editor", "group": "navigation" },
-        { "command": "latexVisual.showSource", "when": "activeCustomEditorId == latexVisual.editor", "group": "navigation" }
+        {
+          "command": "latexVisual.openToSide",
+          "when": "resourceExtname == .tex && activeCustomEditorId != latexVisual.editor",
+          "group": "navigation"
+        },
+        {
+          "command": "latexVisual.showSource",
+          "when": "activeCustomEditorId == latexVisual.editor",
+          "group": "navigation"
+        }
       ],
       "explorer/context": [
-        { "command": "latexVisual.open", "when": "resourceExtname == .tex", "group": "navigation" }
+        {
+          "command": "latexVisual.open",
+          "when": "resourceExtname == .tex",
+          "group": "navigation"
+        }
       ],
       "commandPalette": [
-        { "command": "latexVisual.open", "when": "resourceExtname == .tex" },
-        { "command": "latexVisual.openToSide", "when": "resourceExtname == .tex" },
-        { "command": "latexVisual.showSource", "when": "activeCustomEditorId == latexVisual.editor" }
+        {
+          "command": "latexVisual.open",
+          "when": "resourceExtname == .tex"
+        },
+        {
+          "command": "latexVisual.openToSide",
+          "when": "resourceExtname == .tex"
+        },
+        {
+          "command": "latexVisual.showSource",
+          "when": "activeCustomEditorId == latexVisual.editor"
+        }
       ]
     },
     "configuration": {
@@ -43,9 +94,12 @@
       "properties": {
         "latexVisual.pageStyle": {
           "type": "string",
-          "enum": ["theme", "paper"],
+          "enum": [
+            "theme",
+            "paper"
+          ],
           "default": "theme",
-          "description": "Initial page style: follow the VS Code colour theme, or render on a white paper sheet. Toggle per editor with the ◐ Paper button."
+          "description": "Initial page style: follow the VS Code colour theme, or render on a white paper sheet. Toggle per editor with the \u25d0 Paper button."
         }
       }
     }
@@ -56,8 +110,9 @@
     "typecheck": "tsc --noEmit -p .",
     "test:unit": "node scripts/build.mjs && node --test test/unit/*.test.cjs",
     "test:integration": "node scripts/build.mjs && node test/integration/run.mjs",
-    "test": "npm run typecheck && npm run test:unit && npm run test:integration",
-    "package": "node scripts/build.mjs --production && vsce package --no-dependencies"
+    "test": "npm run typecheck && npm run test:unit && npm run test:browser && npm run test:integration",
+    "package": "node scripts/build.mjs --production && vsce package --no-dependencies",
+    "test:browser": "node scripts/build.mjs && node test/browser/inline.cjs"
   },
   "dependencies": {
     "katex": "^0.16.11",
@@ -69,6 +124,7 @@
     "@vscode/test-electron": "2.4.1",
     "@vscode/vsce": "3.2.1",
     "esbuild": "0.24.0",
+    "puppeteer-core": "^23.6.0",
     "typescript": "5.6.3"
   }
 }

@@ -23,6 +23,7 @@ interface PendingEdit {
   offset: number;
   removed: number;
   text: string;
+  seq: number;
 }
 
 export interface RenderStats {
@@ -38,6 +39,8 @@ export interface RenderStats {
 
 class EditorSession {
   private pending: PendingEdit[] = [];
+  /** Sequence number of the last webview edit applied to the document. */
+  private ack = 0;
   private resourceKey = '';
   private resources: HostResources = { images: {}, bib: '' };
   private disposables: vscode.Disposable[] = [];
@@ -115,17 +118,18 @@ class EditorSession {
     const head = this.pending[0];
     const c = e.contentChanges[0];
     const fromWebview = !!head && e.contentChanges.length === 1 && c.rangeOffset === head.offset && c.rangeLength === head.removed && c.text === head.text;
-    if (fromWebview) this.pending.shift();
+    if (fromWebview) this.ack = this.pending.shift()!.seq;
     const changes = e.contentChanges.map((ch) => ({ offset: ch.rangeOffset, removed: ch.rangeLength, inserted: ch.text.length }));
     void this.sendUpdate(!fromWebview, changes);
   }
 
   private async sendUpdate(external: boolean, changes: { offset: number; removed: number; inserted: number }[]) {
+    const ack = this.ack;
     const text = this.document.getText();
     const host = await this.collectResources(text);
     // The document may have changed while resources were being resolved; the
     // next change event will send a fresh update.
-    void this.post({ type: 'update', text: this.document.getText(), host, external, changes });
+    void this.post({ type: 'update', text: this.document.getText(), host, external, changes, ack });
   }
 
   private async onMessage(m: any) {
@@ -134,7 +138,12 @@ class EditorSession {
         await this.sendUpdate(true, []);
         break;
       case 'edit':
-        await this.applyEdit(m.start, m.end, m.text);
+        await this.applyEdit(m.start, m.end, m.text, m.seq ?? 0);
+        break;
+      case 'undo':
+      case 'redo':
+        // The visual editor is the active editor, so this acts on its document.
+        await vscode.commands.executeCommand(m.type);
         break;
       case 'reveal': {
         const range = new vscode.Range(this.document.positionAt(m.start), this.document.positionAt(m.end));
@@ -183,16 +192,17 @@ class EditorSession {
     }
   }
 
-  private async applyEdit(start: number, end: number, text: string) {
+  private async applyEdit(start: number, end: number, text: string, seq: number) {
     const doc = this.document;
     const range = new vscode.Range(doc.positionAt(start), doc.positionAt(end));
     // Line endings: the webview works with the text as given by getText().
-    this.pending.push({ offset: doc.offsetAt(range.start), removed: doc.offsetAt(range.end) - doc.offsetAt(range.start), text });
+    this.pending.push({ offset: doc.offsetAt(range.start), removed: doc.offsetAt(range.end) - doc.offsetAt(range.start), text, seq });
     const edit = new vscode.WorkspaceEdit();
     edit.replace(doc.uri, range, text);
     const ok = await vscode.workspace.applyEdit(edit);
     if (!ok) {
       this.pending = [];
+      this.ack = seq;
       this.provider.log('Failed to apply edit from visual editor');
       await this.sendUpdate(true, []);
     }

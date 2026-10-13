@@ -57,10 +57,11 @@ exports.run = async function () {
     assert.match(html, /data-pdf="https:\/\/[^"]*signal\.pdf\?v=\d+/);
     assert.match(html, /Image not found: missing-figure/);
     // Give pdf.js time to rasterise, then confirm no failures.
-    await sleep(2500);
-    const after = await session.test({ action: 'html' });
-    assert.ok(!/Could not render PDF/.test(after), 'pdf.js rendered the PDF');
-    assert.match(after, /pdf-graphic[^>]*src="data:image\/png/);
+    const after = await until(async () => {
+      const h = await session.test({ action: 'html' });
+      return /Could not render PDF|pdf-graphic[^>]*src="data:image\/png/.test(h) && h;
+    }, 'pdf.js rasterisation', 20000);
+    assert.ok(!/Could not render PDF/.test(after), 'pdf.js rendered the PDF: ' + (after.match(/Could not render PDF[^<]*/) || [''])[0]);
   });
 
   const doc = await vscode.workspace.openTextDocument(uri);
@@ -78,6 +79,23 @@ exports.run = async function () {
     const res = await session.test({ action: 'editBlock', selector: '.blk-paragraph', index: 1, text: ' Appended.' });
     assert.ok(res.ok, JSON.stringify(res));
     await until(() => doc.getText().includes('all\nrendered inline.\\footnote{Footnotes are shown below their paragraph.} Appended.'), 'append edit');
+  });
+
+  await check('typing inline in the rendered text edits the source', async () => {
+    const res = await session.test({ action: 'typeAt', after: 'Special relativity', text: ' theory 100%' });
+    assert.ok(res.ok, JSON.stringify(res));
+    await until(() => doc.getText().includes('Special relativity theory 100\\%~\\cite{einstein1905}'), 'typed text in document');
+    const html = await session.test({ action: 'html' });
+    assert.match(html, /Special relativity theory 100%/);
+  });
+
+  await check('undo from the visual editor reverts typing', async () => {
+    const before = doc.getText();
+    await vscode.commands.executeCommand('undo');
+    await until(() => doc.getText() !== before, 'undo applied');
+    assert.ok(!doc.getText().includes('theory 100\\%'), 'typing undone');
+    await vscode.commands.executeCommand('redo');
+    await until(() => doc.getText().includes('theory 100\\%'), 'redo applied');
   });
 
   await check('inserting a block from the toolbar', async () => {

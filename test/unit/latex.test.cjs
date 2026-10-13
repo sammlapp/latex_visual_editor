@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const L = require('../../dist/latex.cjs');
 
-const sampleDir = path.join(__dirname, '..', '..', 'sample');
+const sampleDir = path.join(__dirname, '..', 'fixtures');
 const paper = fs.readFileSync(path.join(sampleDir, 'paper.tex'), 'utf8');
 const bib = fs.readFileSync(path.join(sampleDir, 'refs.bib'), 'utf8');
 const host = {
@@ -37,7 +37,7 @@ test('splits the body into the expected blocks', () => {
 test('every block range maps back to its exact source', () => {
   for (const b of ctx.doc.blocks) {
     const src = paper.slice(b.start, b.end);
-    assert.equal(src, src.trim(), `block ${b.kind} has untrimmed range`);
+    assert.equal(src.replace(/[ \t]+$/, ''), src.trim(), `block ${b.kind} has untrimmed range`);
     if (b.kind === 'math' && b.name === 'equation') assert.ok(src.startsWith('\\begin{equation}') && src.endsWith('\\end{equation}'));
     if (b.kind === 'heading') assert.match(src, /^\\(sub)*section/);
   }
@@ -81,7 +81,7 @@ test('renders the table with booktabs rules and multicolumn', () => {
   assert.match(html, /border-top:2px/);
   assert.match(html, /border-bottom:2px/);
   assert.match(text, /Table 1: Accuracy by method\./);
-  assert.match(html, /<strong>84\.5<\/strong>/);
+  assert.match(html, /<strong[^>]*><span[^>]*>84\.5<\/span><\/strong>/);
 });
 
 test('renders figures, subfigures and missing images', () => {
@@ -131,4 +131,31 @@ test('handles fragments, nesting and odd inputs without throwing', () => {
   const mr = L.renderDocument(L.buildContext('\\begin{tabular}{cc}\\multirow{2}{*}{X} & a \\\\ & b \\\\\\end{tabular}', { images: {}, bib: '' }));
   assert.match(mr, /rowspan="2"/);
   assert.equal((mr.match(/<td/g) || []).length, 3);
+});
+
+test('every rendered text run maps back to its source characters', () => {
+  const docs = [paper, String.raw`A -- B --- C \`\`q'' \% \& \$ x~y \ldots{} \'e \"o \c{c} \noindent z`, 'line\\\\\nnext \\textbf{b\\emph{i}} {g} % c\n  after'];
+  const unesc = (s) => s.replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+  for (const d of docs) {
+    const c = L.buildContext(d, host);
+    const out = L.renderDocument(c);
+    let n = 0;
+    for (const m of out.matchAll(/<span class="r" data-s="(\d+)" data-e="(\d+)">([^<]*)<\/span>/g)) {
+      const toks = L.scanRun(d, Number(m[1]), Number(m[2]), c);
+      assert.equal(toks.map((t) => t.out).join(''), unesc(m[3]), `run ${m[1]}-${m[2]}`);
+      assert.equal(toks[0].s, Number(m[1]));
+      assert.equal(toks[toks.length - 1].e, Number(m[2]));
+      n++;
+    }
+    assert.ok(n > 0);
+  }
+});
+
+test('editable regions cover paragraphs, headings, captions, cells and the title', () => {
+  const regions = [...html.matchAll(/data-region="(\w+)" data-s="(\d+)" data-e="(\d+)"/g)].map((m) => m[1]);
+  for (const k of ['p', 'h', 'cap', 'cell', 'title', 'fn']) assert.ok(regions.includes(k), `region ${k}`);
+  // Display math, figures and tables are not directly editable as text.
+  assert.match(html, /class="blk blk-math"[^>]*contenteditable="false"/);
+  assert.match(html, /class="blk blk-figure"[^>]*contenteditable="false"/);
+  assert.match(html, /class="isl math" contenteditable="false"/);
 });

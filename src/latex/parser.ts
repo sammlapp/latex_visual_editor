@@ -33,6 +33,8 @@ export interface ListItem {
   end: number;
   /** Range of the `[label]` contents, for description lists / custom labels. */
   label?: { start: number; end: number };
+  /** Offset just after `\item` (and its label): where an empty item's text goes. */
+  contentStart: number;
   children: Block[];
 }
 
@@ -150,7 +152,9 @@ export function parseBlocks(t: string, s: number, e: number): Block[] {
 
   const flush = (at: number) => {
     if (paraStart === -1) return;
+    // Keep trailing spaces on the last line: they may have just been typed.
     const r = trimRange(t, paraStart, at);
+    while (r.end < at && (t[r.end] === ' ' || t[r.end] === '\t')) r.end++;
     if (r.end > r.start) {
       const onlyComments = t
         .slice(r.start, r.end)
@@ -395,7 +399,9 @@ export function parseItems(t: string, s: number, e: number, itemCmd = 'item'): L
   return marks.map((m, idx) => {
     const itemEnd = idx + 1 < marks.length ? marks[idx + 1].at : e;
     const r = trimRange(t, m.at, itemEnd);
-    return { start: r.start, end: r.end, label: m.label, children: parseBlocks(t, m.contentStart, r.end) };
+    // Keep spaces at the end of the item's last line (they may have just been typed).
+    while (r.end < itemEnd && (t[r.end] === ' ' || t[r.end] === '\t')) r.end++;
+    return { start: r.start, end: r.end, label: m.label, contentStart: m.contentStart, children: parseBlocks(t, m.contentStart, r.end) };
   });
 }
 

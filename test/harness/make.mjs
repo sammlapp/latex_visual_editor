@@ -2,13 +2,13 @@
 // VS Code API, for visual testing in a browser. Serve the repo root over HTTP
 // and open /test/harness/index.html.
 import { readFileSync, writeFileSync } from 'fs';
-const text = readFileSync('sample/paper.tex', 'utf8');
-const bib = readFileSync('sample/refs.bib', 'utf8');
+const text = readFileSync('test/fixtures/paper.tex', 'utf8');
+const bib = readFileSync('test/fixtures/refs.bib', 'utf8');
 const host = {
   bib,
   images: {
-    signal: { kind: 'pdf', uri: '/sample/figures/signal.pdf' },
-    'spectrum.png': { kind: 'image', uri: '/sample/figures/spectrum.png' },
+    signal: { kind: 'pdf', uri: '/test/fixtures/figures/signal.pdf' },
+    'spectrum.png': { kind: 'image', uri: '/test/fixtures/figures/spectrum.png' },
     'missing-figure': { kind: 'missing' },
   },
 };

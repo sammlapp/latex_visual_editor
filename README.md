@@ -1,9 +1,9 @@
 # LaTeX Visual Editor
 
 A visual editor for `.tex` files in VS Code. Text, equations, tables, figures
-and cross-references are rendered inline; click any block to edit its LaTeX
-source with a live preview. The `.tex` file stays the source of truth: edits
-are written straight into the document, so undo, save, git and other LaTeX
+and cross-references are rendered inline, and you **type directly into the
+rendered page**. The `.tex` file stays the source of truth: every keystroke
+becomes a small edit of the LaTeX source, so undo, save, git and other LaTeX
 extensions keep working.
 
 ## Usage
@@ -13,13 +13,32 @@ extensions keep working.
   or right-click the file → *Open With…* → *LaTeX Visual Editor*.
 - To always open `.tex` files visually, add to settings:
   `"workbench.editorAssociations": { "*.tex": "latexVisual.editor" }`
-- **Click a block** to edit its source. Changes apply live. `Esc` or `⌘/Ctrl+Enter`
-  finishes; `⌘B` / `⌘I` wrap the selection in `\textbf` / `\emph`; `⌘M` wraps it in `$…$`.
-- **Toolbar**: insert paragraph, section, equation, table, figure (pick an image file),
-  or list after the selected block; insert `\ref` / `\cite` at the cursor from a
-  searchable list; toggle paper style; open the source side by side.
-- Click a reference or citation to jump to its target. Moving the cursor in the
-  text editor highlights the matching block.
+
+### Typing
+
+- Click into any paragraph, heading, caption, table cell, footnote or the title
+  and type. Characters with a special meaning in LaTeX (`% & # _ { } ~ ^`) are
+  escaped for you.
+- **Enter** splits a paragraph (or starts a new paragraph at the end of one);
+  at the end of a list item it starts a new `\item`, and on an empty item it
+  leaves the list. **Backspace** at the start of a paragraph joins it to the
+  previous one. **Shift+Enter** inserts a line break (`\\`).
+- **⌘/Ctrl+B** and **⌘/Ctrl+I** wrap the selection in `\textbf{…}` / `\emph{…}`
+  (again to remove). **⌘/Ctrl+Z** undoes through VS Code's normal history.
+- Type **`$`** (or press ⌘/Ctrl+M) to insert inline math, and **`\`** to insert
+  any LaTeX command, both in a small popover with a live preview.
+- **→ Ref** and **❝ Cite** insert `\ref` / `\cite` at the caret from a
+  searchable list of labels and bibliography entries.
+
+### Math, figures, tables and other blocks
+
+- Click inline math, a display equation, a figure, a table's border or any
+  other non-text element to edit its source with a live preview
+  (`Esc` or `⌘/Ctrl+Enter` to finish).
+- Hover any block and click **`</>`** at its left to edit its full source.
+- Click a reference or citation to jump to its target (⌥/Alt+click to edit it).
+- The toolbar inserts sections, equations, tables, figures (pick an image file)
+  and lists after the current block.
 
 ## What is rendered
 
