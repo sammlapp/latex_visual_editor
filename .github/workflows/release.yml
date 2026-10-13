@@ -25,7 +25,8 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Check tag matches package.json version
-        run: test "v$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME}"
+        run: |
+          test "v$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME}"
       - run: npm run typecheck
       - run: npm run test:unit
       - run: npm run test:browser
@@ -35,7 +36,9 @@ jobs:
       - name: Package
         run: npm run package
       - name: GitHub Release with the .vsix
-        run: gh release create "$GITHUB_REF_NAME" *.vsix --title "$GITHUB_REF_NAME" --notes "See CHANGELOG.md. Install: Extensions view → ··· → Install from VSIX…"
+        run: |
+          gh release create "$GITHUB_REF_NAME" *.vsix --title "$GITHUB_REF_NAME" \
+            --notes "See CHANGELOG.md. Install: Extensions view → ··· → Install from VSIX…"
         env:
           GH_TOKEN: ${{ github.token }}
       - name: Publish to Open VSX
