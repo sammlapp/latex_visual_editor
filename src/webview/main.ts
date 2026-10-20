@@ -51,6 +51,10 @@ interface SourceEditor {
   parentStart?: number;
   /** Removes the completion dropdown. */
   cleanup?: () => void;
+  /** New block in an empty paragraph: separator written before the first content (e.g. a blank line). */
+  prefix?: string;
+  /** Length of `prefix` once it has been written. */
+  added: number;
 }
 
 const vscode = acquireVsCodeApi();
@@ -804,6 +808,13 @@ document.addEventListener('beforeinput', (e) => {
     case 'insertReplacementText': {
       const data = e.data ?? e.dataTransfer?.getData('text/plain') ?? '';
       if (e.inputType === 'insertText' && (data === '$' || data === '\\')) {
+        // In an empty paragraph, \ starts a block written in LaTeX (a figure, a table…).
+        const reg = regionOf(target.startContainer);
+        const blk = reg?.closest<HTMLElement>('.blk');
+        if (data === '\\' && reg?.dataset.region === 'p' && blk && isEmptyParagraph(blk)) {
+          openEditor(blk, '\\');
+          return;
+        }
         openInsertPopover(target, data === '$' ? '$$' : '\\', 1);
         return;
       }
@@ -858,6 +869,13 @@ function pastePlain(target: AbstractRange, raw: string) {
       tableOp((m, pos) => ({ focus: fillCells(m, pos, grid.map((row) => row.map(escapeLatex))) }));
       return;
     }
+  }
+  // LaTeX code pasted into an empty paragraph is kept as LaTeX (a figure, a table…).
+  const reg = regionOf(target.startContainer);
+  if (reg?.dataset.region === 'p' && reg.dataset.s === reg.dataset.e && /\\(begin\s*\{|[A-Za-z]{2,})/.test(data)) {
+    replaceRange(target, data.trim().replace(/\n{3,}/g, '\n\n'));
+    showToast('Pasted as LaTeX code.');
+    return;
   }
   replaceRange(target, escapeLatex(data).replace(/\n{3,}/g, '\n\n'));
 }
@@ -1047,7 +1065,7 @@ function closePopover() {
 /** Maps an offset from the last full render to the current text (accounts for an open source editor). */
 function remap(offset: number): number {
   if (!sourceEd) return offset;
-  const delta = sourceEd.hostLen - (sourceEd.origEnd - sourceEd.origStart);
+  const delta = sourceEd.hostLen + sourceEd.added - (sourceEd.origEnd - sourceEd.origStart);
   return offset >= sourceEd.origEnd ? offset + delta : offset;
 }
 
@@ -1256,14 +1274,14 @@ page.addEventListener('mousemove', (e) => {
   const t = e.target as HTMLElement;
   if (t === gutter || t === delBtn) return;
   const blk = t.closest<HTMLElement>('#doc > .blk, .blk');
-  if (!blk || blk.classList.contains('phantom')) return;
+  if (!blk) return;
   gutterTarget = blk;
   const pr = page.getBoundingClientRect();
   const br = blk.getBoundingClientRect();
   gutter.style.display = 'block';
   gutter.style.top = `${br.top - pr.top}px`;
   gutter.style.left = `${Math.max(2, br.left - pr.left - 34)}px`;
-  const deletable = !blk.classList.contains('blk-preamble');
+  const deletable = !blk.classList.contains('blk-preamble') && !blk.classList.contains('phantom');
   delBtn.style.display = deletable ? 'block' : 'none';
   delBtn.style.top = `${br.top - pr.top + 2}px`;
   delBtn.style.left = `${br.right - pr.left - 22}px`;
@@ -1332,14 +1350,19 @@ function showToast(message: string, action?: string, onAction?: () => void) {
 // ---------------------------------------------------------------------------
 // Source editor (for math, figures, tables, islands and "</>")
 
-function openEditor(el: HTMLElement) {
+/** An empty paragraph (new or in an empty list item): its LaTeX editor writes a new block. */
+const isEmptyParagraph = (el: HTMLElement) => el.classList.contains('blk-paragraph') && el.dataset.start === el.dataset.end;
+
+/** Opens the LaTeX source editor for a block or island; `initial` pre-fills an empty paragraph's editor. */
+function openEditor(el: HTMLElement, initial?: string) {
   flushWin();
   closePopover();
   hideDiagPopup();
   const start = Number(el.dataset.start);
   const end = Number(el.dataset.end);
   selected = { start, end };
-  const kind = el.classList.contains('isl')
+  const newBlock = isEmptyParagraph(el);
+  const kind = newBlock ? 'new block' : el.classList.contains('isl')
     ? el.classList.contains('math') ? 'math' : el.classList.contains('refisl') ? 'reference' : 'inline'
     : el.classList.contains('item') ? 'item' : ([...el.classList].find((c) => c.startsWith('blk-'))?.slice(4) ?? 'block');
 
@@ -1361,7 +1384,7 @@ function openEditor(el: HTMLElement) {
     <div class="preview"></div>`;
   const ta = container.querySelector('textarea')!;
   const preview = container.querySelector<HTMLElement>('.preview')!;
-  ta.value = text.slice(start, end);
+  ta.value = newBlock ? initial ?? '' : text.slice(start, end);
   el.replaceWith(container);
 
   sourceEd = {
@@ -1373,12 +1396,14 @@ function openEditor(el: HTMLElement) {
     ta,
     preview,
     parentStart: parentEl ? Number(parentEl.dataset.start) : undefined,
+    prefix: newBlock ? el.querySelector<HTMLElement>('.ed')?.dataset.prefix ?? '' : undefined,
+    added: 0,
   };
   sourceEd.cleanup = attachCompletion(ta);
   autosize(ta);
   updatePreview(true);
   ta.focus();
-  if (kind === 'paragraph' || kind === 'heading') ta.setSelectionRange(ta.value.length, ta.value.length);
+  if (kind === 'paragraph' || kind === 'heading' || newBlock) ta.setSelectionRange(ta.value.length, ta.value.length);
   else if (kind === 'math' && /^\$.*\$$/s.test(ta.value)) ta.setSelectionRange(ta.value.length - 1, ta.value.length - 1);
   else ta.setSelectionRange(0, 0);
   updateToolbarState();
@@ -1476,6 +1501,17 @@ function flushSend() {
   const value = sourceEd.ta.value;
   const old = text.slice(sourceEd.start, sourceEd.start + sourceEd.hostLen);
   if (value === old) return;
+  if (sourceEd.prefix && !sourceEd.added) {
+    // A new block: write its separator together with the first content.
+    const ins = sourceEd.prefix + value;
+    sendEdit(sourceEd.start, sourceEd.start, ins);
+    shiftDiagnostics(sourceEd.start, sourceEd.start, ins.length);
+    text = text.slice(0, sourceEd.start) + ins + text.slice(sourceEd.start);
+    sourceEd.start += sourceEd.prefix.length;
+    sourceEd.added = sourceEd.prefix.length;
+    sourceEd.hostLen = value.length;
+    return;
+  }
   sendEdit(sourceEd.start, sourceEd.start + sourceEd.hostLen, value);
   shiftDiagnostics(sourceEd.start, sourceEd.start + sourceEd.hostLen, value.length);
   text = text.slice(0, sourceEd.start) + value + text.slice(sourceEd.start + sourceEd.hostLen);
@@ -1484,6 +1520,8 @@ function flushSend() {
 
 function closeEditor(send = true) {
   if (!sourceEd) return;
+  // A new block left with just the backslash that opened it is dropped.
+  if (sourceEd.prefix !== undefined && /^\s*\\?\s*$/.test(sourceEd.ta.value)) sourceEd.ta.value = '';
   if (send) flushSend();
   clearTimeout(sourceEd.previewTimer);
   sourceEd.cleanup?.();

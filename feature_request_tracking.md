@@ -20,11 +20,12 @@ Can't copy/cut content from multiple chunks. Enable shift+click across sections 
 
 cmd+A should select entire chunk (currently no effect)
 
-when a cell is empty, I can't open the raw latex editor. Thus I can't eg paste latex code or start typing latex code to insert a figure
 
 Typing a space before an existing space glues the next typed word onto the following word: with the cursor after "Special" in "Special relativity", typing " th" gives "Special  threlativity" (rendered "Special threlativity") instead of "Special th relativity". The source now has two spaces, which render as one; the cursor position after that rendered space maps to the end of both source spaces, so the following characters land at the start of the next word. Cause: runIndexToSource in src/webview/main.ts snaps to the end of a collapsed whitespace run.
 
 # Completed
+
+Completed (bug): when a block is empty, I can't open the raw latex editor, so I can't paste latex code or start typing latex code to insert a figure. Fixed: in an empty paragraph (new paragraph or empty list item), typing \ or clicking </> opens the full LaTeX editor for a new block (with command/environment completion), and pasting text containing LaTeX commands inserts it as LaTeX. A lone \ is discarded on Esc.
 
 Completed: Auto-complete of latex commands or symbols. For instance, when typing \bet should se "beta" as an auto-complete option. Done: suggestions after \ in the \ box and in source editors, matched by name and description, with KaTeX previews for math symbols and the document's own macros; snippets put the caret in the braces; math symbols in running text are wrapped in $…$; environments after \begin{ get their \end. Not in the plain text paragraphs themselves (typing \ there opens the \ box, which has the completion).
 

@@ -48,7 +48,7 @@ are escaped for you.
 | Line break (`\\`) | Shift+Enter |
 | Bold / italic (toggle) | ⌘/Ctrl+B, ⌘/Ctrl+I |
 | Inline math | type `$` (or ⌘/Ctrl+M) |
-| Any LaTeX command | type `\` |
+| Any LaTeX command | type `\` (in an empty paragraph, this opens a full LaTeX editor for a new block, e.g. a figure) |
 | Undo / redo | ⌘/Ctrl+Z, ⇧⌘Z / Ctrl+Y (VS Code's normal history) |
 | Find | ⌘/Ctrl+F (VS Code's find widget, searching the rendered text) |
 

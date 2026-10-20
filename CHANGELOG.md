@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Empty paragraphs: `\` or `</>` opens the LaTeX editor for a new block, and pasted LaTeX code stays LaTeX.
+
 - Command and symbol completion after `\` (with math previews and the document's own macros), and environment
   completion after `\begin{` that adds the matching `\end`.
 

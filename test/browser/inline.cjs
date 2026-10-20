@@ -480,8 +480,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   assert.ok(doc.includes('\\begin{itemize}\n  \\item\nPoint\n\\end{itemize}'), '16 saved');
   await consistent('after source editor completion');
 
-  // 17. The \\ box opens just below the caret, also in an empty paragraph or an empty table cell.
-  for (const where of ['paragraph', 'cell']) {
+  // 17. The \\ box opens just below the caret, also in an empty table cell (empty paragraphs open the block editor, see 18).
+  for (const where of ['cell']) {
     if (where === 'paragraph') {
       await caretAfter('Specixyzal');
       await pg.evaluate(() => { const p = getSelection().focusNode.parentElement.closest('.ed'); const r = document.createRange(); r.selectNodeContents(p); r.collapse(false); const s = getSelection(); s.removeAllRanges(); s.addRange(r); });
@@ -494,11 +494,71 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await pg.waitForSelector('.popover');
     const top = await pg.$eval('.popover', (p) => p.getBoundingClientRect().top);
     assert.ok(top > target - 30 && top < target + 30, `17 box below the empty ${where}: box ${Math.round(top)}, ${where} bottom ${Math.round(target)}`);
-    await pg.keyboard.press('Escape');
+    await pg.keyboard.press('Escape'); // closes the suggestions
+    await pg.keyboard.press('Escape'); // closes the box
     await sleep(100);
   }
   await sync();
   await consistent('after empty-region boxes');
+
+  // 18. Empty paragraphs: \\ opens the full LaTeX editor for a new block; LaTeX code pastes as LaTeX; </> works there.
+  await sync();
+  const newParagraphAfter = async (needle) => {
+    // Click at the end of the paragraph's last line, then End and Enter, as a person would.
+    const pt = await pg.evaluate((needle) => {
+      const run = [...document.querySelectorAll('#doc .r')].find((r) => r.textContent.includes(needle));
+      run.scrollIntoView({ block: 'center' });
+      const t = run.firstChild;
+      const r = document.createRange(); r.setStart(t, t.length - 1); r.setEnd(t, t.length);
+      const b = r.getBoundingClientRect();
+      return { x: b.left + 1, y: b.top + b.height / 2 };
+    }, needle);
+    await pg.mouse.click(pt.x, pt.y);
+    await pg.keyboard.press('End');
+    await pg.keyboard.press('Enter');
+    await pg.waitForSelector('.phantom');
+  };
+  await newParagraphAfter('are numbered automatically');
+  const before18 = doc;
+  await pg.keyboard.type('\\');
+  await pg.waitForSelector('.editor textarea');
+  assert.deepEqual(await pg.$eval('.editor', (e) => [e.querySelector('.editor-kind').textContent, e.querySelector('textarea').value]), ['new block', '\\'], '18 \\ opens the block editor');
+  await pg.keyboard.press('Escape');
+  await pg.keyboard.press('Escape');
+  await sync();
+  assert.equal(doc, before18, '18 a lone \\ is dropped');
+  await newParagraphAfter('are numbered automatically');
+  await pg.keyboard.type('\\begin{fig');
+  await pg.waitForFunction(() => document.querySelector('.complete .cmp.active b')?.textContent === 'figure} [htbp]');
+  await pg.keyboard.press('Enter');
+  await pg.keyboard.type('Inline figure text');
+  await pg.keyboard.press('Escape');
+  await sync();
+  assert.ok(/ ok\.\n\n\\begin\{figure\}\[htbp\]\n  Inline figure text\n\\end\{figure\}\n/.test(doc), '18 new figure block after the paragraph: ' + JSON.stringify(doc.slice(doc.indexOf('are numbered automatically'), doc.indexOf('are numbered automatically') + 140)));
+  assert.ok(await pg.evaluate(() => [...document.querySelectorAll('.blk-figure')].some((f) => f.textContent.includes('Inline figure text'))), '18 rendered as a figure');
+  await consistent('after new LaTeX block');
+  await newParagraphAfter('are numbered automatically');
+  await pg.evaluate(() => {
+    const dt = new DataTransfer();
+    dt.setData('text/plain', '\\subsection{Pasted}\nSome \\emph{code}.\n');
+    document.activeElement.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  });
+  await sync();
+  assert.ok(doc.includes(' ok.\n\n\\subsection{Pasted}\nSome \\emph{code}.\n'), '18 LaTeX pasted as code: ' + JSON.stringify(doc.slice(doc.indexOf(' ok.'), doc.indexOf(' ok.') + 60)));
+  assert.match(await pg.$eval('.toast', (t) => t.textContent), /Pasted as LaTeX code/);
+  await consistent('after LaTeX paste');
+  await newParagraphAfter('are numbered automatically');
+  const ph = await pg.evaluate(() => { const r = document.querySelector('.phantom').getBoundingClientRect(); return { x: r.left + 30, y: r.top + r.height / 2 }; });
+  await pg.mouse.move(ph.x, ph.y);
+  await pg.waitForSelector('#gutter', { visible: true });
+  await pg.click('#gutter');
+  await pg.waitForSelector('.editor textarea');
+  assert.equal(await pg.$eval('.editor-kind', (e) => e.textContent), 'new block', '18 </> on an empty paragraph');
+  await pg.keyboard.type('Plain $x$ text.');
+  await pg.keyboard.press('Escape');
+  await sync();
+  assert.ok(doc.includes(' ok.\n\nPlain $x$ text.\n'), '18 typed into the new block');
+  await consistent('after </> on empty paragraph');
 
   console.log(errs.length ? 'PAGE ERRORS:\n' + errs.join('\n') : 'no page errors');
   console.log('ALL INLINE CHECKS PASSED');
