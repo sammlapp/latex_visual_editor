@@ -392,6 +392,38 @@ body.paper .editor textarea { background: #fafafa; color: #1a1a1a; }
 }
 #gutter:hover { opacity: 1; }
 body.paper #gutter { background: #f0f0f0; color: #333; }
+#del-block {
+  display: none;
+  position: absolute;
+  z-index: 5;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  line-height: 18px;
+  font-size: 15px;
+  border-radius: 10px;
+  opacity: 0.45;
+}
+#del-block:hover { opacity: 1; background: var(--error); color: #fff; }
+body.paper #del-block:not(:hover) { background: #f0f0f0; color: #333; }
+.toast {
+  position: fixed;
+  z-index: 70;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 6px 8px 6px 14px;
+  border-radius: 6px;
+  background: var(--vscode-notifications-background, #333);
+  color: var(--vscode-notifications-foreground, #fff);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25);
+  font-family: var(--sans);
+  font-size: 12px;
+}
 .editor.inline-editor { display: inline-block; vertical-align: top; min-width: 320px; margin: 2px 0; text-indent: 0; white-space: normal; }
 .popover {
   position: fixed;

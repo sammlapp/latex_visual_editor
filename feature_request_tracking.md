@@ -3,8 +3,6 @@
 
 Auto-complete of latex commands or symbols. For instance, when typing \bet should se "beta" as an auto-complete option. 
 
-remove block with an 'x' button shown when hovering over upper-right corner of the block
-
 collapse/expand sections from the header line
 
 drag-drop figure from VS Code Explorer
@@ -28,6 +26,8 @@ when a cell is empty, I can't open the raw latex editor. Thus I can't eg paste l
 Typing a space before an existing space glues the next typed word onto the following word: with the cursor after "Special" in "Special relativity", typing " th" gives "Special  threlativity" (rendered "Special threlativity") instead of "Special th relativity". The source now has two spaces, which render as one; the cursor position after that rendered space maps to the end of both source spaces, so the following characters land at the start of the next word. Cause: runIndexToSource in src/webview/main.ts snaps to the end of a collapsed whitespace run.
 
 # Completed
+
+Completed: remove block with an 'x' button shown when hovering over upper-right corner of the block. Done: × at the hovered block's upper right (next to the </> on the left); deletes the block and its empty line, or the whole \item when the block is the item's only content; Undo notice (or Cmd+Z). The preamble can't be deleted this way.
 
 Completed: Cmd+F not availabile for search. Uses VS Code's own find widget (Cmd/Ctrl+F, Enter / Shift+Enter for next/previous) over the rendered text. Not done: find-and-replace.
 

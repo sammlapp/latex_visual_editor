@@ -350,6 +350,33 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   assert.ok(doc.includes('Specixyzal 50\\%\\includegraphics'), '14b cut removed it from the source');
   await consistent('after paste/cut');
 
+  // 14c. The × on a hovered block deletes it (a list item's only paragraph deletes the item).
+  await sync();
+  const hoverDelete = async (sel, text) => {
+    const box = await pg.evaluate((sel, text) => {
+      const el = [...document.querySelectorAll(sel)].find((e) => e.textContent.includes(text));
+      el.scrollIntoView({ block: 'center' });
+      const r = el.getBoundingClientRect();
+      return { x: r.left + 20, y: r.top + r.height / 2 };
+    }, sel, text);
+    await pg.mouse.move(box.x, box.y);
+    await pg.waitForSelector('#del-block', { visible: true });
+    await pg.click('#del-block');
+    await sync();
+  };
+  await hoverDelete('li .blk-paragraph', 'First numbered point');
+  assert.ok(doc.includes('\\begin{enumerate}\n  \\item Second numbered point.'), '14c list item deleted: ' + JSON.stringify(doc.slice(doc.indexOf('\\begin{enumerate}'), doc.indexOf('\\begin{enumerate}') + 50)));
+  assert.match(await pg.$eval('.toast', (t) => t.textContent), /Deleted list item\.Undo/);
+  await pg.click('.toast button');
+  assert.ok((await pg.evaluate(() => window.__sent.splice(0))).some((m) => m.type === 'undo'), '14c toast undo forwarded');
+  await consistent('after deleting an item');
+  await hoverDelete('.blk-comment', 'hidden in the output');
+  assert.ok(doc.includes('\\end{enumerate}\n\n\\bibliographystyle{plain}'), '14c comment block and its line deleted: ' + JSON.stringify(doc.slice(doc.indexOf('\\end{enumerate}'), doc.indexOf('\\end{enumerate}') + 40)));
+  await consistent('after deleting a block');
+  const preBox = await pg.evaluate(() => { const r = document.querySelector('.blk-preamble'); r.scrollIntoView(); const b = r.getBoundingClientRect(); return { x: b.left + 20, y: b.top + b.height / 2 }; });
+  await pg.mouse.move(preBox.x, preBox.y);
+  assert.equal(await pg.$eval('#del-block', (b) => getComputedStyle(b).display), 'none', '14c the preamble cannot be deleted');
+
   // 15. Table editing: the table bar appears in a cell, and edits rewrite the tabular.
   await sync();
   const tableSrc = () => doc.slice(doc.indexOf('\\begin{table}'), doc.indexOf('\\end{table}') + 11);

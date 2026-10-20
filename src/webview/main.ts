@@ -1211,15 +1211,21 @@ function handleLink(a: HTMLAnchorElement) {
   }
 }
 
-// Hover button to edit any block's source.
+// Hover buttons: edit any block's source (left), delete the block (upper right).
 let gutterTarget: HTMLElement | null = null;
+const delBtn = document.createElement('button');
+delBtn.id = 'del-block';
+delBtn.textContent = '×';
+delBtn.title = 'Delete this block (⌘Z / Ctrl+Z to undo)';
+page.appendChild(delBtn);
+const hideHoverButtons = () => {
+  gutter.style.display = 'none';
+  delBtn.style.display = 'none';
+};
 page.addEventListener('mousemove', (e) => {
-  if (sourceEd) {
-    gutter.style.display = 'none';
-    return;
-  }
+  if (sourceEd) return hideHoverButtons();
   const t = e.target as HTMLElement;
-  if (t === gutter) return;
+  if (t === gutter || t === delBtn) return;
   const blk = t.closest<HTMLElement>('#doc > .blk, .blk');
   if (!blk || blk.classList.contains('phantom')) return;
   gutterTarget = blk;
@@ -1228,13 +1234,71 @@ page.addEventListener('mousemove', (e) => {
   gutter.style.display = 'block';
   gutter.style.top = `${br.top - pr.top}px`;
   gutter.style.left = `${Math.max(2, br.left - pr.left - 34)}px`;
+  const deletable = !blk.classList.contains('blk-preamble');
+  delBtn.style.display = deletable ? 'block' : 'none';
+  delBtn.style.top = `${br.top - pr.top + 2}px`;
+  delBtn.style.left = `${br.right - pr.left - 22}px`;
 });
-page.addEventListener('mouseleave', () => (gutter.style.display = 'none'));
+page.addEventListener('mouseleave', hideHoverButtons);
 gutter.addEventListener('mousedown', (e) => e.preventDefault());
 gutter.addEventListener('click', () => {
   gutter.style.display = 'none';
   if (gutterTarget && root.contains(gutterTarget)) openEditor(gutterTarget);
 });
+delBtn.addEventListener('mousedown', (e) => e.preventDefault());
+delBtn.addEventListener('click', () => {
+  hideHoverButtons();
+  if (gutterTarget && root.contains(gutterTarget)) deleteBlock(gutterTarget);
+});
+
+/** The source range a deletion of `blk` removes: its own line(s), or its list item when it is the item's only block. */
+function deletionRange(blk: HTMLElement): { a: number; b: number; what: string } {
+  let el: HTMLElement = blk;
+  const item = blk.parentElement?.closest<HTMLElement>('.item');
+  if (item && root.contains(item) && item.querySelectorAll('.blk').length === 1) el = item;
+  let a = Number(el.dataset.start);
+  let b = Number(el.dataset.end);
+  // Take the whole line when the block stands alone on it.
+  const lineStart = text.lastIndexOf('\n', a - 1) + 1;
+  let lineEnd = text.indexOf('\n', b);
+  if (lineEnd === -1) lineEnd = text.length;
+  if (/^[ \t]*$/.test(text.slice(lineStart, a)) && /^[ \t]*$/.test(text.slice(b, lineEnd))) {
+    a = lineStart;
+    b = Math.min(text.length, lineEnd + 1);
+    // Don't leave more than one blank line where the block was.
+    const blankBefore = /\n[ \t]*\n$/.test(text.slice(0, a)) || a === 0;
+    while (blankBefore && b < text.length && /^[ \t]*\n/.test(text.slice(b))) b = text.indexOf('\n', b) + 1;
+  }
+  const kind = el === item ? 'list item' : ([...blk.classList].find((c) => c.startsWith('blk-'))?.slice(4) ?? 'block');
+  return { a, b, what: kind };
+}
+
+function deleteBlock(blk: HTMLElement) {
+  if (sourceEd) closeEditor();
+  flushWin();
+  const { a, b, what } = deletionRange(blk);
+  if (b <= a) return;
+  selected = null;
+  applyEdit(a, b, '', a, null);
+  flushWin();
+  showToast(`Deleted ${what}.`, 'Undo', () => requestHistory('undo'));
+}
+
+let toastTimer: number | undefined;
+function showToast(message: string, action?: string, onAction?: () => void) {
+  document.querySelector('.toast')?.remove();
+  clearTimeout(toastTimer);
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.innerHTML = `<span>${esc(message)}</span>${action ? `<button>${esc(action)}</button>` : ''}`;
+  t.querySelector('button')?.addEventListener('mousedown', (e) => e.preventDefault());
+  t.querySelector('button')?.addEventListener('click', () => {
+    t.remove();
+    onAction?.();
+  });
+  document.body.appendChild(t);
+  toastTimer = window.setTimeout(() => t.remove(), 6000);
+}
 
 // ---------------------------------------------------------------------------
 // Source editor (for math, figures, tables, islands and "</>")

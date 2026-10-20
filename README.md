@@ -83,7 +83,9 @@ one undoable step.
 
 **Math, figures and everything else.** Click an equation, figure or
 table (or inline math) to edit its source with a live preview. Hover any block
-and click **`</>`** at its left to edit its full LaTeX source. Click a
+and click **`</>`** at its left to edit its full LaTeX source, or **×** at its upper
+right to delete it (a list item's only paragraph deletes the item; ⌘/Ctrl+Z or
+**Undo** in the notice brings it back). Click a
 reference or citation to jump to its target (⌥/Alt+click to edit it).
 
 The toolbar inserts sections, equations, tables, figures (pick an image file)

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Delete any block with the × at its upper right on hover (with an Undo notice).
 - Cmd/Ctrl+F opens VS Code's find widget in the visual editor.
 - `\input` / `\include` files render inline, read-only, with an **Open ↗** button (or double-click) to
   edit them. Section, equation, figure and citation numbering continues across files, `\ref`s into
