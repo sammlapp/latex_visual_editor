@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Clicking a citation opens its `\cite{…}` for editing, with the bibliography list open; hovering a citation
+  shows a card with the entry's title, authors, venue and year.
+- Copy and cut put the selection's LaTeX source on the clipboard, so citations, references, math and
+  formatting survive pasting (in the visual editor or the source). Citations, refs and math are copied
+  whole, and a selection that starts or ends inside `\textbf{…}`, a link or a list is completed into valid LaTeX.
+  Rich-text apps get readable text.
+- Pasted text that is LaTeX code (commands, `\%`-style escapes, environments) is kept as LaTeX; other text
+  is still escaped.
+- Pasted text flashes briefly, and scrolls into view, so it is clear where it went.
+- New extension icon.
+
 ## 0.2.0 — 2026-10-20
 
 - Empty paragraphs: `\` or `</>` opens the LaTeX editor for a new block, and pasted LaTeX code stays LaTeX.

@@ -7,8 +7,6 @@ collapse/expand sections from the header line
 drag-drop figure from VS Code Explorer
 
 Problems panel navigation: clicking an item in the Problems panel should go to that position in the open visual editor (split out of the LTeX item below; not done yet).
-
-
 # Bugs
 
 
@@ -24,6 +22,10 @@ cmd+A should select entire chunk (currently no effect)
 Typing a space before an existing space glues the next typed word onto the following word: with the cursor after "Special" in "Special relativity", typing " th" gives "Special  threlativity" (rendered "Special threlativity") instead of "Special th relativity". The source now has two spaces, which render as one; the cursor position after that rendered space maps to the end of both source spaces, so the following characters land at the start of the next word. Cause: runIndexToSource in src/webview/main.ts snaps to the end of a collapsed whitespace run.
 
 # Completed
+
+Completed: clicking on a rendered citation should open the cite/citep/citet{} editor rather than scroll to the citation. Hovering over a citation renders a little box with the title/authors/year/journal. Done: click opens the \cite{…} source with the caret after the keys and the bibliography list open; hovering shows a card with title, authors, venue (volume, pages), year, entry type, key and DOI. Citations in included files and the reference list still jump on click.
+
+Completed (bug): copy-paste lost refs, citations and raw LaTeX, and a paste could land unnoticed elsewhere in the document. Copy/cut now put the selection's LaTeX source on the clipboard (citations, refs and math whole; partial \textbf{…}/link/list selections completed into valid LaTeX); pasting LaTeX code keeps it as LaTeX; pasted text flashes and scrolls into view. The misplaced paste itself was never reproduced; if it recurs, note where the yellow flash appears.
 
 Completed (bug): when a block is empty, I can't open the raw latex editor, so I can't paste latex code or start typing latex code to insert a figure. Fixed: in an empty paragraph (new paragraph or empty list item), typing \ or clicking </> opens the full LaTeX editor for a new block (with command/environment completion), and pasting text containing LaTeX commands inserts it as LaTeX. A lone \ is discarded on Esc.
 

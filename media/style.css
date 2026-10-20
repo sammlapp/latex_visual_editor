@@ -521,3 +521,29 @@ body.paper .diag-pop { background: #fff; color: #1a1a1a; }
 .diag-fixes { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .diag-fix.preferred { background: var(--btn-primary-bg); color: var(--btn-primary-fg); }
 .diag-none { color: var(--muted); font-size: 11px; }
+
+/* Citation hover card. */
+.cite-pop {
+  position: fixed;
+  z-index: 55;
+  max-width: min(420px, calc(100vw - 16px));
+  padding: 7px 10px;
+  background: var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background, #fff));
+  color: var(--vscode-editorHoverWidget-foreground, var(--fg));
+  border: 1px solid var(--vscode-editorHoverWidget-border, var(--border));
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25);
+  font-family: var(--sans);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.cite-pop.undef { border-left-color: var(--error); }
+body.paper .cite-pop { background: #fff; color: #1a1a1a; }
+.bc-title { font-weight: 600; font-size: 13px; }
+.bc-authors { margin-top: 2px; }
+.bc-venue { margin-top: 2px; }
+.bc-key { margin-top: 4px; color: var(--muted); font-size: 11px; font-family: var(--vscode-editor-font-family, monospace); }
+
+/* Just-pasted text, briefly. */
+::highlight(pasted) { background-color: rgba(255, 200, 0, 0.45); }

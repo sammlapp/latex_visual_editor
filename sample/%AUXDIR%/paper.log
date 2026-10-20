@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.29 (TeX Live 2026) (preloaded format=pdflatex 2026.3.22)  19 OCT 2026 20:48
+This is pdfTeX, Version 3.141592653-2.6-1.40.29 (TeX Live 2026) (preloaded format=pdflatex 2026.3.22)  20 OCT 2026 09:44
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -341,11 +341,7 @@ LaTeX Warning: Label `tab:new' multiply defined.
 
 LaTeX Warning: Label `tab:new' multiply defined.
 
-) (%AUXDIR%/table.aux
-
-LaTeX Warning: Label `tab:new' multiply defined.
-
-))
+) (%AUXDIR%/ex.aux))
 \openout1 = `paper.aux'.
 
 LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 21.
@@ -366,7 +362,8 @@ LaTeX Font Info:    Checking defaults for PD1/pdf/m/n on input line 21.
 LaTeX Font Info:    ... okay on input line 21.
 LaTeX Font Info:    Checking defaults for PU/pdf/m/n on input line 21.
 LaTeX Font Info:    ... okay on input line 21.
- (/usr/local/texlive/2026/texmf-dist/tex/context/base/mkii/supp-pdf.mkii
+
+(/usr/local/texlive/2026/texmf-dist/tex/context/base/mkii/supp-pdf.mkii
 [Loading MPS to PDF converter (version 2006.09.02).]
 \scratchcounter=\count318
 \scratchdimen=\dimen185
@@ -410,148 +407,150 @@ LaTeX Font Info:    Trying to load font information for U+msb on input line 23.
 File: umsb.fd 2013/01/14 v3.01 AMS symbols B
 )
 
-Package natbib Warning: Citation `einstein1905' on page 1 undefined on input li
-ne 30.
+Package natbib Warning: Author undefined for citation`knuth1984' 
+(natbib)                on page 1 on input line 31.
 
 
-Package natbib Warning: Citation `knuth1984' on page 1 undefined on input line 
-31.
-
-
-Package natbib Warning: Citation `vaswani2017' on page 1 undefined on input lin
-e 31.
-
-
-Package natbib Warning: Citation `knuth1984' on page 1 undefined on input line 
-31.
-
-
-Package natbib Warning: Citation `knuth1984' on page 1 undefined on input line 
-56.
+LaTeX Warning: Reference `fig:pair' on page 1 undefined on input line 61.
 
 [1
 
 {/usr/local/texlive/2026/texmf-var/fonts/map/pdftex/updmap/pdftex.map}{/usr/loc
 al/texlive/2026/texmf-dist/fonts/enc/dvips/cm-super/cm-super-ts1.enc}]
-<figures/signal.pdf, id=53, 167.84206pt x 109.46797pt>
+<figures/signal.pdf, id=60, 167.84206pt x 109.46797pt>
 File: figures/signal.pdf Graphic file (type pdf)
 <use figures/signal.pdf>
 Package pdftex.def Info: figures/signal.pdf  used on input line 80.
 (pdftex.def)             Requested size: 216.0022pt x 140.88853pt.
 
-/Users/SML161/latex_visual_editor/sample/paper.tex:88: Too many }'s.
-l.88 }
-       is a PNG.}
-You've closed more groups than you opened.
-Such booboos are generally harmless, so keep going.
+Runaway argument?
+/Users/SML161/latex_visual_editor/sample/paper.tex:86: Paragraph ended before \
+T@ref was complete.
+<to be read again> 
+                   \par 
+l.86 
+     
+I suspect you've forgotten a `}', causing me to apply this
+control sequence to too much text. How can we recover?
+My plan is to forget the whole thing and hope for the best.
 
-/Users/SML161/latex_visual_editor/sample/paper.tex:88: Too many }'s.
-l.88 } is a PNG.}
-                 
-You've closed more groups than you opened.
-Such booboos are generally harmless, so keep going.
-
-/Users/SML161/latex_visual_editor/sample/paper.tex:90: Too many }'s.
-\@endfloatbox ...pagefalse \outer@nobreak \egroup 
-                                                  \color@endbox 
-l.90 \end{figure}
-                 
-You've closed more groups than you opened.
-Such booboos are generally harmless, so keep going.
-
-/Users/SML161/latex_visual_editor/sample/paper.tex:90: Extra \endgroup.
-\color@endgroup ->\endgraf \@endpefalse \endgroup 
-                                                  
-l.90 \end{figure}
-                 
-Things are pretty mixed up, but I think the worst is over.
-
-/Users/SML161/latex_visual_editor/sample/paper.tex:90: Too many }'s.
-\color@endbox ->\color@endgroup \egroup 
-                                        
-l.90 \end{figure}
-                 
-You've closed more groups than you opened.
-Such booboos are generally harmless, so keep going.
-
-
-/Users/SML161/latex_visual_editor/sample/paper.tex:90: LaTeX Error: \begin{docu
-ment} ended by \end{figure}.
-
-See the LaTeX manual or LaTeX Companion for explanation.
-Type  H <return>  for immediate help.
- ...                                              
-                                                  
-l.90 \end{figure}
-                 
-Your command was ignored.
-Type  I <command> <return>  to replace it with another command,
-or  <return>  to continue without it.
-
-/Users/SML161/latex_visual_editor/sample/paper.tex:90: Extra \endgroup.
-\end  ...end#1\endcsname \@checkend {#1}\endgroup 
-                                                  \UseHook {env/#1/after}\if...
-l.90 \end{figure}
-                 
-Things are pretty mixed up, but I think the worst is over.
-
-<figures/spectrum.png, id=54, 167.62625pt x 109.40875pt>
+<figures/spectrum.png, id=61, 167.62625pt x 109.40875pt>
 File: figures/spectrum.png Graphic file (type png)
 <use figures/spectrum.png>
-Package pdftex.def Info: figures/spectrum.png  used on input line 94.
+Package pdftex.def Info: figures/spectrum.png  used on input line 89.
 (pdftex.def)             Requested size: 251.9989pt x 164.47829pt.
 File: figures/spectrum.png Graphic file (type png)
 <use figures/spectrum.png>
-Package pdftex.def Info: figures/spectrum.png  used on input line 101.
+Package pdftex.def Info: figures/spectrum.png  used on input line 96.
 (pdftex.def)             Requested size: 251.9989pt x 164.47829pt.
 
-/Users/SML161/latex_visual_editor/sample/paper.tex:105: LaTeX Error: Lonely \it
+/Users/SML161/latex_visual_editor/sample/paper.tex:100: LaTeX Error: Lonely \it
 em--perhaps a missing list environment.
 
 See the LaTeX manual or LaTeX Companion for explanation.
 Type  H <return>  for immediate help.
  ...                                              
                                                   
-l.105   \item A
+l.100   \item A
                n undefined reference shows as \ref{sec:nowhere}.
 Try typing  <return>  to proceed.
 If that doesn't work, type  X <return>  to quit.
 
 
-LaTeX Warning: Reference `sec:nowhere' on page 2 undefined on input line 105.
+LaTeX Warning: Reference `sec:nowhere' on page 2 undefined on input line 100.
 
 
-/Users/SML161/latex_visual_editor/sample/paper.tex:106: LaTeX Error: \begin{doc
+/Users/SML161/latex_visual_editor/sample/paper.tex:101: LaTeX Error: \begin{doc
 ument} ended by \end{itemize}.
 
 See the LaTeX manual or LaTeX Companion for explanation.
 Type  H <return>  for immediate help.
  ...                                              
                                                   
-l.106 \end{itemize}
+l.101 \end{itemize}
                    
 Your command was ignored.
 Type  I <command> <return>  to replace it with another command,
 or  <return>  to continue without it.
 
-/Users/SML161/latex_visual_editor/sample/paper.tex:106: Extra \endgroup.
+/Users/SML161/latex_visual_editor/sample/paper.tex:101: Extra \endgroup.
 \end  ...end#1\endcsname \@checkend {#1}\endgroup 
                                                   \UseHook {env/#1/after}\if...
-l.106 \end{itemize}
+l.101 \end{itemize}
                    
 Things are pretty mixed up, but I think the worst is over.
 
 (%AUXDIR%/paper.bbl [2 <./figures/signal.pdf>] [3 <./figures/spectrum.png>])
-
-Package natbib Warning: Citation `farnsworth' on page 4 undefined on input line
- 119.
-
 [4]
 \openout2 = `table.aux'.
 
  (./table.tex) [5
 
-] [6
+]
+/Users/SML161/latex_visual_editor/sample/paper.tex:139: Undefined control seque
+nce.
+<argument> >{\raggedleft \arraybackslash 
+                                         }p{0.10\linewidth }>{\centering \ar...
+l.139 ...tering\arraybackslash}p{0.03\linewidth}c}
+                                                  
+The control sequence at the end of the top line
+of your error message was never \def'ed. If you have
+misspelled it (e.g., `\hobx'), type `I' and the correct
+spelling (e.g., `I\hbox'). Otherwise just continue,
+and I'll forget about whatever was undefined.
+
+/Users/SML161/latex_visual_editor/sample/paper.tex:139: Undefined control seque
+nce.
+<argument> ...width }>{\centering \arraybackslash 
+                                                  }p{0.03\linewidth }c
+l.139 ...tering\arraybackslash}p{0.03\linewidth}c}
+                                                  
+The control sequence at the end of the top line
+of your error message was never \def'ed. If you have
+misspelled it (e.g., `\hobx'), type `I' and the correct
+spelling (e.g., `I\hbox'). Otherwise just continue,
+and I'll forget about whatever was undefined.
+
+
+/Users/SML161/latex_visual_editor/sample/paper.tex:139: LaTeX Error: Illegal ch
+aracter in array arg.
+
+See the LaTeX manual or LaTeX Companion for explanation.
+Type  H <return>  for immediate help.
+ ...                                              
+                                                  
+l.139 ...tering\arraybackslash}p{0.03\linewidth}c}
+                                                  
+You're in trouble here.  Try typing  <return>  to proceed.
+If that doesn't work, type  X <return>  to quit.
+
+
+/Users/SML161/latex_visual_editor/sample/paper.tex:139: LaTeX Error: Illegal ch
+aracter in array arg.
+
+See the LaTeX manual or LaTeX Companion for explanation.
+Type  H <return>  for immediate help.
+ ...                                              
+                                                  
+l.139 ...tering\arraybackslash}p{0.03\linewidth}c}
+                                                  
+You're in trouble here.  Try typing  <return>  to proceed.
+If that doesn't work, type  X <return>  to quit.
+
+
+/Users/SML161/latex_visual_editor/sample/paper.tex:139: LaTeX Error:  Illegal c
+haracter in array arg.
+
+See the LaTeX manual or LaTeX Companion for explanation.
+Type  H <return>  for immediate help.
+ ...                                              
+                                                  
+l.139 ...tering\arraybackslash}p{0.03\linewidth}c}
+                                                  
+You're in trouble here.  Try typing  <return>  to proceed.
+If that doesn't work, type  X <return>  to quit.
+
+[6
 
 
 ]
@@ -559,14 +558,21 @@ Package natbib Warning: Citation `farnsworth' on page 4 undefined on input line
 
  (./table.tex) [7
 
+] [8
+
+
 ]
-\openout2 = `table.aux'.
-
- (./table.tex) [8
+\openout2 = `ex.aux'.
 
 
+No file ex.tex.
+/Users/SML161/latex_visual_editor/sample/paper.tex:152: Too many }'s.
+l.152 This is noningles. \include{ex.tex}}
+                                          
+You've closed more groups than you opened.
+Such booboos are generally harmless, so keep going.
 
-])
+)
 ! Emergency stop.
 <*> ...SML161/latex_visual_editor/sample/paper.tex
                                                   
@@ -574,11 +580,11 @@ Package natbib Warning: Citation `farnsworth' on page 4 undefined on input line
 
  
 Here is how much of TeX's memory you used:
- 11700 strings out of 467525
- 182253 string characters out of 5418982
- 595306 words of memory out of 5000000
- 40436 multiletter control sequences out of 15000+600000
+ 11717 strings out of 467525
+ 182607 string characters out of 5418982
+ 595741 words of memory out of 5000000
+ 40456 multiletter control sequences out of 15000+600000
  640777 words of font info for 90 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 75i,11n,79p,583b,556s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 75i,11n,79p,583b,562s stack positions out of 10000i,1000n,20000p,200000b,200000s
 !  ==> Fatal error occurred, no output PDF file produced!

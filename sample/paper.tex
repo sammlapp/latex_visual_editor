@@ -32,7 +32,7 @@ Special relativity~\cite{einstein1905} gave us $E = mc^2$, while
 rely on \emph{attention}. See Section~\ref{sec:method} for details, and
 \textbf{bold}, \textit{italic}, \texttt{monospace} and ``quoted'' text --- all
 rendered inline.\footnote{Footnotes are shown below their paragraph.}
-%comment 
+``this''. %comment 
 
 \section{Method}
 \label{sec:method}
@@ -82,12 +82,7 @@ signal and Figure~\ref{fig:pair} compares two views.
   \label{fig:signal}
 \end{figure}
 
-\
-
-
-} is a PNG.}
-  \label{fig:pair}
-\end{figure}
+\ref
 
 \begin{figure}[htbp]
   \centering
@@ -101,7 +96,7 @@ signal and Figure~\ref{fig:pair} compares two views.
   \includegraphics[width=0.7\linewidth]{figures/spectrum.png}
   \caption{Caption for spectrum.}
   \label{fig:spectrum}
-\end{figure}erenced by number.
+\end{figure}Rerenced by number.
   \item An undefined reference shows as \ref{sec:nowhere}.
 \end{itemize}
 
@@ -111,12 +106,13 @@ signal and Figure~\ref{fig:pair} compares two views.
 \end{enumerate}
 
 % This comment is hidden in the output.
+What if we could type latex like it were a document? [4]
 \bibliographystyle{plain}
 \bibliography{refs}
 
 \section{Title}
 
-What if we could type latex like it were a document? \citep{farnsworth}
+
 
 New paragraph.
 
@@ -130,7 +126,7 @@ New paragraph.
     Item & A & B \\
     \midrule
     First & 1 & 2 \\
-    Second & 3 & 4 \\
+    Second 3 4&&\\
     \bottomrule
   \end{tabular}
   \caption{New table.}
@@ -139,7 +135,8 @@ New paragraph.
 
 \begin{table}[htbp]
   \centering
-  \begin{tabular}{lcc}
+  \setlength{\tabcolsep}{2pt}
+  \begin{tabular}{>{\raggedleft\arraybackslash}p{0.10\linewidth}>{\centering\arraybackslash}p{0.03\linewidth}c}
     \toprule
     Item & A & B \\
     \midrule
@@ -149,7 +146,7 @@ New paragraph.
   \end{tabular}
   \caption{New table.}
   \label{tab:new}
-\end{table}\include{table.tex} 
+\end{table} 
 \include{table.tex}
 
 This is noningles. \include{ex.tex}}

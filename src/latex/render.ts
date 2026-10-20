@@ -677,7 +677,7 @@ function renderCite(cmd: string, keysSrc: string, opts: string[], ctx: Ctx): str
     const entry = ctx.bib.get(key);
     const known = entry || ctx.bibitemText.has(key);
     const tip = entry ? bibPlain(entry) : ctx.bibitemText.has(key) ? stripTags(renderInline(ctx.rootText.slice(ctx.bibitemText.get(key)!.start, ctx.bibitemText.get(key)!.end), ctx)) : `Citation key not found: ${key}`;
-    return `<a class="cite${known ? '' : ' undef'}" data-cite="${escapeHtml(key)}" title="${escapeHtml(tip)}">${text}</a>`;
+    return `<a class="cite${known ? '' : ' undef'}" data-cite="${escapeHtml(key)}" data-tip="${escapeHtml(tip)}">${text}</a>`;
   };
   const num = (key: string) => String(ctx.cites.get(key) ?? '?');
   // natbib: \citep[pre][post]{k}; a single optional arg is the postnote.
@@ -709,6 +709,26 @@ function renderCite(cmd: string, keysSrc: string, opts: string[], ctx: Ctx): str
 
 function stripBraces(s: string): string {
   return s.replace(/[{}]/g, '');
+}
+
+/** A small card describing a bibliography entry (title, authors, venue, year), shown when hovering a citation. */
+export function bibCard(e: BibEntry, ctx: Ctx): string {
+  const f = e.fields;
+  const tex = (v: string | undefined) => (v ? stripBraces(renderInline(v, ctx)) : '');
+  const names = splitAuthors(f.author ?? f.editor ?? '').map((n) => {
+    const [last, first] = n.includes(',') ? n.split(/,\s*/, 2) : [n.split(/\s+/).pop()!, n.split(/\s+/).slice(0, -1).join(' ')];
+    return first ? `${first} ${last}` : last;
+  });
+  const authors = names.length > 6 ? names.slice(0, 5).concat('et al.') : names;
+  const venue = f.journal ?? f.booktitle ?? f.publisher ?? f.school ?? f.institution ?? f.howpublished;
+  const detail = [f.volume ? `${f.volume}${f.number ? `(${f.number})` : ''}` : '', f.pages ? f.pages.replace(/-+/, '–') : ''].filter(Boolean).join(', ');
+  const rows = [
+    f.title ? `<div class="bc-title">${tex(f.title)}</div>` : '',
+    authors.length ? `<div class="bc-authors">${tex(authors.join(', '))}${f.editor && !f.author ? ' (eds.)' : ''}</div>` : '',
+    venue || f.year ? `<div class="bc-venue">${[venue ? `<i>${tex(venue)}</i>` : '', detail, f.year ? escapeHtml(f.year) : ''].filter(Boolean).join(' · ')}</div>` : '',
+    `<div class="bc-key">${escapeHtml(e.type)} · ${escapeHtml(e.key)}${f.doi ? ` · doi:${escapeHtml(f.doi)}` : ''}</div>`,
+  ];
+  return rows.join('');
 }
 
 function bibPlain(e: BibEntry): string {

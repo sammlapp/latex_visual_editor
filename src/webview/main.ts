@@ -8,7 +8,7 @@
 // source popover instead.
 
 import { Ctx, HostResources, buildContext } from '../latex/context';
-import { renderBlock, renderDocument, renderInline, renderKatex, renderRange, scanRun, stripTags } from '../latex/render';
+import { bibCard, renderBlock, renderDocument, renderInline, renderKatex, renderRange, scanRun, stripTags } from '../latex/render';
 import { Block } from '../latex/parser';
 import {
   CompletionContext, CompletionItem, citationItems, commandItems, completionAt, environmentItems, fileItems, filterCompletions, inMath, labelItems,
@@ -877,27 +877,232 @@ function pastePlain(target: AbstractRange, raw: string) {
     showToast('Pasted as LaTeX code.');
     return;
   }
-  replaceRange(target, escapeLatex(data).replace(/\n{3,}/g, '\n\n'));
+  if (looksLikeLatex(data)) {
+    pasteLatex(target, data);
+    return;
+  }
+  const ins = escapeLatex(data).replace(/\n{3,}/g, '\n\n');
+  replaceRange(target, ins);
+  flashPasted(ins.length);
 }
 
 // VS Code pastes and cuts in webviews with document.execCommand, which fires
 // paste / cut events but no beforeinput, and would edit the DOM directly
 // (pasting HTML) without touching the source. Handle both here.
+// Copy and cut put the selection's LaTeX source on the clipboard, so math,
+// citations, references and formatting survive pasting.
+const LATEX_MIME = 'text/x-latex-source';
+/** The last LaTeX this editor copied, in case the private clipboard type doesn't survive the round trip. */
+let lastCopied = '';
+
 document.addEventListener('paste', (e) => {
   if (!root.contains(e.target as Node) || isSourceUi(e.target)) return;
   e.preventDefault();
   const sel = window.getSelection();
   if (!sel?.rangeCount || !regionOf(sel.getRangeAt(0).startContainer)) return;
-  pastePlain(sel.getRangeAt(0), e.clipboardData?.getData('text/plain') ?? '');
+  const plain = e.clipboardData?.getData('text/plain') ?? '';
+  const latex = e.clipboardData?.getData(LATEX_MIME) || (plain && plain === lastCopied ? plain : '');
+  if (latex) pasteLatex(sel.getRangeAt(0), latex);
+  else pastePlain(sel.getRangeAt(0), plain);
+});
+document.addEventListener('copy', (e) => {
+  if (!root.contains(e.target as Node) || isSourceUi(e.target)) return;
+  if (putSelectionOnClipboard(e)) e.preventDefault();
 });
 document.addEventListener('cut', (e) => {
   if (!root.contains(e.target as Node) || isSourceUi(e.target)) return;
   const sel = window.getSelection();
   if (!sel?.rangeCount || sel.isCollapsed) return;
   e.preventDefault();
-  e.clipboardData?.setData('text/plain', sel.toString());
+  if (!putSelectionOnClipboard(e)) e.clipboardData?.setData('text/plain', sel.toString());
   replaceRange(sel.getRangeAt(0), '');
 });
+
+function pasteLatex(target: AbstractRange, latex: string) {
+  const ins = latex.replace(/\r\n?/g, '\n').replace(/\n{3,}/g, '\n\n');
+  replaceRange(target, ins);
+  flashPasted(ins.length);
+}
+
+/**
+ * Puts the selection's LaTeX source on the clipboard (as plain text, so it also
+ * pastes into the source editor, and under a private type), plus readable HTML
+ * for rich-text apps. False when it doesn't map to source (the browser's copy is used).
+ */
+function putSelectionOnClipboard(e: ClipboardEvent): boolean {
+  const sel = window.getSelection();
+  if (!sel?.rangeCount || sel.isCollapsed || !e.clipboardData) return false;
+  const range = sel.getRangeAt(0);
+  const src = selectionLatex(range);
+  if (!src) return false;
+  lastCopied = src;
+  e.clipboardData.setData('text/plain', src);
+  e.clipboardData.setData(LATEX_MIME, src);
+  e.clipboardData.setData('text/html', richHtml(range));
+  return true;
+}
+
+/** Source offset of a selection end: citations, refs and math count whole, and a non-editable block counts whole. */
+function boundarySource(node: Node, offset: number, side: 'start' | 'end'): number | null {
+  const el = node.nodeType === 3 ? node.parentElement : (node as HTMLElement);
+  let isl: HTMLElement | null = el?.closest<HTMLElement>('.isl') ?? null;
+  for (let up = isl?.parentElement?.closest<HTMLElement>('.isl'); up; up = up.parentElement?.closest<HTMLElement>('.isl')) isl = up;
+  if (isl && root.contains(isl)) return Number(side === 'start' ? isl.dataset.start : isl.dataset.end);
+  if (regionOf(node)) return domToSource(node, offset);
+  const blk = el?.closest<HTMLElement>('.blk');
+  if (blk && root.contains(blk)) return Number(side === 'start' ? blk.dataset.start : blk.dataset.end);
+  return domToSource(node, offset);
+}
+
+/** The selection as complete LaTeX: commands and environments cut by its ends are reopened or closed. */
+function selectionLatex(range: Range): string {
+  let a = boundarySource(range.startContainer, range.startOffset, 'start');
+  let b = boundarySource(range.endContainer, range.endOffset, 'end');
+  if (a === null || b === null) return '';
+  if (a > b) [a, b] = [b, a];
+  if (a === b) return '';
+  const blkEl = (range.startContainer.nodeType === 3 ? range.startContainer.parentElement : (range.startContainer as HTMLElement))?.closest<HTMLElement>('.blk');
+  const from = blkEl && Number(blkEl.dataset.start) <= a ? Number(blkEl.dataset.start) : 0;
+  return completeLatex(text, from, a, b);
+}
+
+/**
+ * Returns src[a, b) made self-contained: groups open at `a` (scanning from
+ * `from`) are reopened with their command (`\textbf{`, `\href{url}{`), groups
+ * left open at `b` are closed, and unmatched \begin / \end get their partners.
+ */
+function completeLatex(src: string, from: number, a: number, b: number): string {
+  const openers = scanOpeners(src, from, a);
+  let body = src.slice(a, b);
+  // Close groups opened before or inside the selection that it leaves open.
+  let depth = openers.length;
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    if (c === '\\') i++;
+    else if (c === '%') {
+      const nl = body.indexOf('\n', i);
+      if (nl === -1) break;
+      i = nl;
+    } else if (c === '{') depth++;
+    else if (c === '}') depth = Math.max(0, depth - 1);
+  }
+  body = openers.join('') + body + (body.match(/%[^\n]*$/) ? '\n' : '') + '}'.repeat(depth);
+  // Environments.
+  const stack: string[] = [];
+  const begins: string[] = [];
+  for (const m of body.matchAll(/\\(begin|end)\s*\{([^}]*)\}/g)) {
+    if (m[1] === 'begin') stack.push(m[2]);
+    else if (stack.length && stack[stack.length - 1] === m[2]) stack.pop();
+    else begins.unshift(m[2]);
+  }
+  const list = (env: string) => /^(itemize|enumerate|description)$/.test(env);
+  const head = begins.map((env) => `\\begin{${env}}\n${list(env) && !/^\s*\\item\b/.test(body) ? '\\item ' : ''}`).join('');
+  const tail = stack.reverse().map((env) => `\n\\end{${env}}`).join('');
+  return head + body + tail;
+}
+
+/** The commands whose brace groups are open at `at`, e.g. ['\\textbf{', '\\href{url}{']. */
+function scanOpeners(src: string, from: number, at: number): string[] {
+  const stack: { opener: string; chain: number }[] = [];
+  let chain = -1;
+  for (let i = from; i < at; i++) {
+    const c = src[i];
+    if (c === '\\') {
+      const m = /^\\([A-Za-z@]+\*?)/.exec(src.slice(i, i + 40));
+      if (m) {
+        chain = i;
+        i += m[0].length - 1;
+      } else {
+        chain = -1;
+        i++;
+      }
+    } else if (c === '%') {
+      const nl = src.indexOf('\n', i);
+      if (nl === -1 || nl >= at) break;
+      i = nl;
+      chain = -1;
+    } else if (c === '[' && chain >= 0) {
+      const close = src.indexOf(']', i);
+      if (close === -1 || close >= at) break;
+      i = close;
+    } else if (c === '{') {
+      stack.push({ opener: chain >= 0 ? src.slice(chain, i + 1) : '{', chain });
+      chain = -1;
+    } else if (c === '}') {
+      chain = stack.pop()?.chain ?? -1;
+    } else if (!(chain >= 0 && /\s/.test(c) && src[i + 1] === '{')) chain = -1;
+  }
+  return stack.map((s) => s.opener);
+}
+
+/** True when pasted plain text is LaTeX code (commands, escapes or environments), so it should be kept rather than escaped. */
+function looksLikeLatex(s: string): boolean {
+  if (!/\\(begin|end)\s*\{|\\[A-Za-z]+\*?(\[[^\]\n]*\])?\{|\\[%&$#_{}]|\\(item|centering|hline|toprule|midrule|bottomrule|noindent|par|LaTeX|TeX)\b/.test(s)) return false;
+  return isBalanced(s) || balancedEnvironments(s);
+}
+
+/** True when every \\begin{x} in `src` has its \\end{x} and braces balance (isBalanced rejects environments). */
+function balancedEnvironments(src: string): boolean {
+  const stack: string[] = [];
+  for (const m of src.matchAll(/\\(begin|end)\s*\{([^}]*)\}/g)) {
+    if (m[1] === 'begin') stack.push(m[2]);
+    else if (stack.pop() !== m[2]) return false;
+  }
+  return stack.length === 0 && isBalanced(src.replace(/\\(begin|end)\s*\{[^}]*\}/g, ''));
+}
+
+/** The selection as HTML for rich-text apps: rendered text, with math as its LaTeX, and no editor chrome. */
+function richHtml(range: Range): string {
+  const box = document.createElement('div');
+  box.appendChild(range.cloneContents());
+  box.querySelectorAll('.anchor, button, .secnum + .ed:empty').forEach((n) => n.remove());
+  box.querySelectorAll<HTMLElement>('.isl[data-start]').forEach((isl) => {
+    if (isl.querySelector('.katex')) isl.replaceWith(text.slice(Number(isl.dataset.start), Number(isl.dataset.end)));
+  });
+  box.querySelectorAll('.katex').forEach((k) => k.replaceWith(k.textContent ?? ''));
+  box.querySelectorAll('*').forEach((n) => {
+    for (const at of [...n.attributes]) if (at.name !== 'href' && at.name !== 'src') n.removeAttribute(at.name);
+  });
+  return box.innerHTML.replace(/\u200b/g, '');
+}
+
+/** The selection's text as it reads, without KaTeX's hidden MathML or caret anchors. */
+function readableText(range: Range): string {
+  const box = document.createElement('div');
+  box.style.cssText = 'position:fixed;left:-10000px;top:0;white-space:pre-wrap;';
+  box.appendChild(range.cloneContents());
+  box.querySelectorAll('.katex-mathml, .anchor, .secnum + .ed:empty').forEach((n) => n.remove());
+  document.body.appendChild(box);
+  const out = box.innerText.replace(/​/g, '');
+  box.remove();
+  return out.trim() ? out : range.toString();
+}
+
+/** Briefly highlights the `length` characters before the caret (just pasted), so it is clear where they went. */
+function flashPasted(length: number) {
+  const end = caretSource();
+  if (end === null || !highlightsSupported) return;
+  const start = Math.max(0, end - length);
+  const ranges: Range[] = [];
+  root.querySelectorAll<HTMLElement>('.r[data-s]').forEach((el) => {
+    const s0 = Number(el.dataset.s);
+    const e0 = Number(el.dataset.e);
+    const node = el.firstChild;
+    if (e0 <= start || s0 >= end || !node || node.nodeType !== 3) return;
+    const len = node.textContent!.length;
+    const r = document.createRange();
+    r.setStart(node, Math.min(sourceToRunIndex(el, Math.max(start, s0)), len));
+    r.setEnd(node, Math.min(sourceToRunIndex(el, Math.min(end, e0)), len));
+    if (!r.collapsed) ranges.push(r);
+  });
+  if (!ranges.length) return;
+  CSS.highlights.set('pasted', new Highlight(...ranges));
+  const rect = ranges[0].getBoundingClientRect();
+  if (rect.top < 60 || rect.bottom > window.innerHeight) ranges[0].startContainer.parentElement?.scrollIntoView({ block: 'center' });
+  clearTimeout(pasteFlashTimer);
+  pasteFlashTimer = window.setTimeout(() => CSS.highlights.delete('pasted'), 1500);
+}
+let pasteFlashTimer: number | undefined;
 
 // IME composition can't be cancelled: let the browser draw it, then commit it as an edit.
 let compositionAt: { pos: number; reg: HTMLElement } | null = null;
@@ -1116,7 +1321,10 @@ root.addEventListener('click', (e) => {
   if (sourceEd && sourceEd.container.contains(target)) return;
 
   const link = target.closest('a');
-  if (link && !e.altKey) {
+  // A citation in editable text opens its \cite{…} for editing (with key completion); other links navigate.
+  const editableCite = !!link?.dataset.cite && !!link.closest('.ed .isl');
+  if (editableCite) hideCitePopup();
+  if (link && !e.altKey && !editableCite) {
     e.preventDefault();
     handleLink(link as HTMLAnchorElement);
     return;
@@ -1405,7 +1613,11 @@ function openEditor(el: HTMLElement, initial?: string) {
   ta.focus();
   if (kind === 'paragraph' || kind === 'heading' || newBlock) ta.setSelectionRange(ta.value.length, ta.value.length);
   else if (kind === 'math' && /^\$.*\$$/s.test(ta.value)) ta.setSelectionRange(ta.value.length - 1, ta.value.length - 1);
-  else ta.setSelectionRange(0, 0);
+  else if (/^~?\\[A-Za-z]*cite[A-Za-z]*\*?(\[[^\]]*\])*\{[^}]*\}$/.test(ta.value)) {
+    // A citation: caret after its keys, with the bibliography list open.
+    ta.setSelectionRange(ta.value.length - 1, ta.value.length - 1);
+    ta.dispatchEvent(new Event('click'));
+  } else ta.setSelectionRange(0, 0);
   updateToolbarState();
 
   ta.addEventListener('input', () => {
@@ -2488,6 +2700,53 @@ function hideDiagPopup() {
 }
 
 // ---------------------------------------------------------------------------
+// Citation hover cards
+
+let citePop: HTMLElement | null = null;
+let citeFor: HTMLElement | null = null;
+let citeTimer: number | undefined;
+
+root.addEventListener('mouseover', (e) => {
+  const a = (e.target as HTMLElement).closest<HTMLElement>('a.cite[data-cite]');
+  if (a === citeFor) return clearTimeout(citeTimer);
+  clearTimeout(citeTimer);
+  if (a && !sourceEd) citeTimer = window.setTimeout(() => showCitePopup(a), citeFor ? 80 : 300);
+  else if (citeFor) citeTimer = window.setTimeout(hideCitePopup, 250);
+});
+root.addEventListener('mouseleave', () => {
+  clearTimeout(citeTimer);
+  if (citeFor) citeTimer = window.setTimeout(hideCitePopup, 250);
+});
+document.addEventListener('keydown', () => hideCitePopup(), true);
+window.addEventListener('scroll', () => hideCitePopup(), true);
+
+function showCitePopup(a: HTMLElement) {
+  hideCitePopup();
+  if (!root.contains(a)) return;
+  const key = a.dataset.cite!;
+  const entry = ctx?.bib.get(key);
+  const pop = document.createElement('div');
+  pop.className = `cite-pop${a.classList.contains('undef') ? ' undef' : ''}`;
+  pop.innerHTML = entry && ctx ? bibCard(entry, ctx) : `<div class="bc-title">${esc(a.dataset.tip ?? key)}</div><div class="bc-key">${esc(key)}</div>`;
+  pop.addEventListener('mouseenter', () => clearTimeout(citeTimer));
+  pop.addEventListener('mouseleave', () => (citeTimer = window.setTimeout(hideCitePopup, 250)));
+  pop.addEventListener('mousedown', (e) => e.preventDefault());
+  document.body.appendChild(pop);
+  citePop = pop;
+  citeFor = a;
+  const rect = a.getBoundingClientRect();
+  pop.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - pop.offsetWidth - 8))}px`;
+  pop.style.top = `${rect.bottom + 4 + pop.offsetHeight > window.innerHeight ? Math.max(4, rect.top - pop.offsetHeight - 4) : rect.bottom + 4}px`;
+}
+
+function hideCitePopup() {
+  clearTimeout(citeTimer);
+  citePop?.remove();
+  citePop = null;
+  citeFor = null;
+}
+
+// ---------------------------------------------------------------------------
 // State & test hooks
 
 function saveState(patch: Record<string, unknown>) {
@@ -2519,6 +2778,34 @@ async function runTest(msg: any) {
       const preview = ed.preview.innerHTML;
       closeEditor();
       return reply({ ok: true, preview: stripTags(preview).slice(0, 200) });
+    }
+    if (msg.action === 'select') {
+      // Selects from the start of `from` to the end of `to` in rendered text.
+      const runs = [...root.querySelectorAll<HTMLElement>('.r')];
+      const a = runs.find((r) => r.textContent!.includes(msg.from));
+      const z = runs.find((r) => r.textContent!.includes(msg.to));
+      if (!a || !z) return reply({ error: 'text not found' });
+      const range = document.createRange();
+      range.setStart(a.firstChild!, a.textContent!.indexOf(msg.from));
+      range.setEnd(z.firstChild!, z.textContent!.indexOf(msg.to) + msg.to.length);
+      (a.closest<HTMLElement>('[contenteditable="true"]') ?? root).focus();
+      const sel = window.getSelection()!;
+      sel.removeAllRanges();
+      sel.addRange(range);
+      return reply({ ok: true, text: sel.toString() });
+    }
+    if (msg.action === 'caretAfter') {
+      // Puts the caret after the first occurrence of `after` in rendered text (like a click there).
+      const run = [...root.querySelectorAll<HTMLElement>('.r')].find((r) => r.textContent!.includes(msg.after));
+      if (!run) return reply({ error: 'text not found' });
+      const range = document.createRange();
+      range.setStart(run.firstChild!, run.textContent!.indexOf(msg.after) + msg.after.length);
+      range.collapse(true);
+      (run.closest<HTMLElement>('[contenteditable="true"]') ?? root).focus();
+      const sel = window.getSelection()!;
+      sel.removeAllRanges();
+      sel.addRange(range);
+      return reply({ ok: true, caret: caretSource() });
     }
     if (msg.action === 'typeAt') {
       // Puts the caret after the first occurrence of `after` in rendered text and types `text`.

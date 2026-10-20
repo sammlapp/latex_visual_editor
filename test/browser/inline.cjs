@@ -560,6 +560,104 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   assert.ok(doc.includes(' ok.\n\nPlain $x$ text.\n'), '18 typed into the new block');
   await consistent('after </> on empty paragraph');
 
+  // 19. Copy puts readable text and the LaTeX source on the clipboard; pasting inside the editor keeps the LaTeX.
+  await sync();
+  const clip = (type, sel) => pg.evaluate((type) => {
+    const dt = new DataTransfer();
+    document.activeElement.dispatchEvent(new ClipboardEvent(type, { clipboardData: dt, bubbles: true, cancelable: true }));
+    return { plain: dt.getData('text/plain'), latex: dt.getData('text/x-latex-source'), html: dt.getData('text/html') };
+  }, type);
+  const selectAcross = (from, to) => pg.evaluate((from, to) => {
+    const runs = [...document.querySelectorAll('#doc .r')];
+    const a = runs.find((r) => r.textContent.includes(from)); const z = runs.find((r) => r.textContent.includes(to) && (a.compareDocumentPosition(r) & Node.DOCUMENT_POSITION_FOLLOWING || r === a));
+    const range = document.createRange(); range.setStart(a.firstChild, a.textContent.indexOf(from)); range.setEnd(z.firstChild, z.textContent.indexOf(to) + to.length);
+    document.getElementById('doc').focus(); const s = getSelection(); s.removeAllRanges(); s.addRange(range);
+  }, from, to);
+  await selectAcross('gave us', 'while');
+  const copied = await clip('copy');
+  assert.equal(copied.latex, 'gave us $E = mc^2$, while', '19 LaTeX source copied');
+  assert.equal(copied.plain, copied.latex, '19 plain text is the LaTeX');
+  assert.ok(copied.html.replace(/<[^>]*>/g, '') === 'gave us $E = mc^2$, while' && !/class=|contenteditable/.test(copied.html), '19 rich HTML: ' + JSON.stringify(copied.html));
+  await caretAfter('The gradient');
+  await pg.evaluate((latex) => {
+    const dt = new DataTransfer(); dt.setData('text/plain', 'ignored'); dt.setData('text/x-latex-source', latex);
+    document.activeElement.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  }, copied.latex);
+  assert.ok(await pg.evaluate(() => CSS.highlights.has('pasted') && [...CSS.highlights.get('pasted')].map((r) => r.toString()).join('').includes('gave us')), '19 pasted text flashes');
+  await sync();
+  assert.ok(doc.includes('The gradientgave us $E = mc^2$, while update'), '19 pasted as LaTeX: ' + JSON.stringify(doc.slice(doc.indexOf('The gradient'), doc.indexOf('The gradient') + 50)));
+  await consistent('after LaTeX copy/paste');
+  // A selection starting inside \\textbf{…} is reopened with its command, so the LaTeX stays complete.
+  await selectAcross('old', 'monospace');
+  const partial = await clip('copy');
+  assert.ok(partial.latex.startsWith('\\textbf{old}') && partial.latex.endsWith('\\texttt{monospace}'), '19 partial group re-wrapped: ' + JSON.stringify(partial.latex));
+  assert.equal(partial.plain, partial.latex, '19 plain text is the LaTeX too');
+  // Citations and references are copied whole, even when the selection starts inside one.
+  await selectAcross('rely on', 'for details');
+  const refs = await clip('copy');
+  assert.ok(refs.latex.startsWith('rely on ') && refs.latex.includes('\\citep{lapp2023opensoundscape}) \\emph{attention}. See Section~\\ref{sec:method} for details'), '19 refs and citations copied: ' + JSON.stringify(refs.latex));
+  await pg.evaluate(() => {
+    const isl = [...document.querySelectorAll('#doc .isl')].find((x) => /Knuth/.test(x.textContent));
+    const t = document.createTreeWalker(isl, NodeFilter.SHOW_TEXT).nextNode();
+    const z = [...document.querySelectorAll('#doc .r')].find((r) => r.textContent.includes('gave us') && isl.compareDocumentPosition(r) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const range = document.createRange(); range.setStart(t, 2); range.setEnd(z.firstChild, z.textContent.indexOf('gave us') + 7);
+    const s = getSelection(); s.removeAllRanges(); s.addRange(range);
+  });
+  const cite = await clip('copy');
+  assert.equal(cite.latex, '\\citet{knuth1984} gave us', '19 citation copied whole from inside it');
+  // Pasting copied LaTeX that lost its private type (e.g. through another app) keeps it.
+  await caretAfter('The gradient');
+  const pastePlainText = (t) => pg.evaluate((t) => {
+    const dt = new DataTransfer(); dt.setData('text/plain', t);
+    document.activeElement.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  }, t);
+  await pastePlainText(' see \\ref{sec:method} and \\cite{knuth1984}');
+  await sync();
+  assert.ok(doc.includes('The gradient see \\ref{sec:method} and \\cite{knuth1984}'), '19 LaTeX plain text kept: ' + JSON.stringify(doc.slice(doc.indexOf('The gradient'), doc.indexOf('The gradient') + 60)));
+  await caretAfter('The gradient');
+  await pastePlainText(' 50% off');
+  await sync();
+  assert.ok(doc.includes('The gradient 50\\% off see'), '19 ordinary text still escaped');
+  await consistent('after plain LaTeX paste');
+  // Cut removes the selection from the source and copies it.
+  const count = () => doc.split('$, while').length - 1;
+  const before19 = count();
+  await selectAcross('while', 'while');
+  const cutData = await clip('cut');
+  await sync();
+  assert.equal(cutData.latex, 'while');
+  assert.equal(count(), before19 - 1, '19 cut removed it');
+  await consistent('after LaTeX cut');
+
+  // 20. Hovering a citation shows its bibliography entry; clicking it edits the \\cite{…}.
+  const citeBox = await pg.evaluate(() => {
+    const a = document.querySelector('#doc a.cite[data-cite="vaswani2017"]');
+    a.scrollIntoView({ block: 'center' });
+    const r = a.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  await pg.mouse.move(citeBox.x, citeBox.y);
+  await pg.waitForSelector('.cite-pop', { timeout: 2000 });
+  const card = await pg.evaluate(() => document.querySelector('.cite-pop').innerText);
+  for (const want of ['Attention Is All You Need', 'Ashish Vaswani', 'Advances in Neural Information Processing Systems', '2017', '5998–6008']) assert.ok(card.includes(want), `20 card has ${want}: ${JSON.stringify(card)}`);
+  assert.ok(!(await pg.evaluate(() => document.querySelector('#doc a.cite').hasAttribute('title'))), '20 no native tooltip as well');
+  await pg.mouse.move(5, 5);
+  await pg.waitForFunction(() => !document.querySelector('.cite-pop'), { timeout: 2000 });
+  const scrollBefore = await pg.evaluate(() => scrollY);
+  await pg.mouse.click(citeBox.x, citeBox.y);
+  const ed = await pg.evaluate(() => {
+    const ta = document.querySelector('.editor textarea');
+    return ta && { value: ta.value, caret: ta.selectionStart, list: !!document.querySelector('.complete:not([style*="none"]) .cmp') };
+  });
+  assert.ok(ed && /^~?\\cite\{vaswani2017, ?knuth1984\}$/.test(ed.value), '20 click opens the cite editor: ' + JSON.stringify(ed));
+  assert.equal(ed.caret, ed.value.length - 1, '20 caret after the keys');
+  assert.ok(ed.list, '20 bibliography list open');
+  assert.ok(Math.abs((await pg.evaluate(() => scrollY)) - scrollBefore) < 5, '20 did not scroll to the bibliography');
+  await pg.keyboard.press('Escape');
+  await pg.keyboard.press('Escape');
+  await sync();
+  await consistent('after editing a citation');
+
   console.log(errs.length ? 'PAGE ERRORS:\n' + errs.join('\n') : 'no page errors');
   console.log('ALL INLINE CHECKS PASSED');
   await b.close();

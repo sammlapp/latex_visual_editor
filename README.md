@@ -1,3 +1,5 @@
+<p align="center"><img src="images/logo.png" alt="Swan" width="200"></p>
+
 # Swan LaTeX Visual Editor
 
 Write LaTeX the way you'd write a document. Text, equations, tables, figures,
@@ -49,6 +51,7 @@ are escaped for you.
 | Bold / italic (toggle) | ⌘/Ctrl+B, ⌘/Ctrl+I |
 | Inline math | type `$` (or ⌘/Ctrl+M) |
 | Any LaTeX command | type `\` (in an empty paragraph, this opens a full LaTeX editor for a new block, e.g. a figure) |
+| Copy / cut / paste | ⌘/Ctrl+C, X, V copy the LaTeX source (citations, refs and math included); pasted LaTeX code stays LaTeX, other text is escaped |
 | Undo / redo | ⌘/Ctrl+Z, ⇧⌘Z / Ctrl+Y (VS Code's normal history) |
 | Find | ⌘/Ctrl+F (VS Code's find widget, searching the rendered text) |
 
@@ -93,7 +96,8 @@ table (or inline math) to edit its source with a live preview. Hover any block
 and click **`</>`** at its left to edit its full LaTeX source, or **×** at its upper
 right to delete it (a list item's only paragraph deletes the item; ⌘/Ctrl+Z or
 **Undo** in the notice brings it back). Click a
-reference or citation to jump to its target (⌥/Alt+click to edit it).
+reference to jump to its target (⌥/Alt+click to edit it). Click a citation to edit it, with
+your bibliography listed; hover one to see the entry's title, authors, venue and year.
 
 The toolbar inserts sections, equations, tables, figures (pick an image file)
 and lists after the current block. **◐ Paper** toggles between your color

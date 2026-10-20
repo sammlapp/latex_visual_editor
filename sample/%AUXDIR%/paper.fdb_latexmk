@@ -1,19 +1,22 @@
 # Fdb version 4
-["bibtex %AUXDIR%/paper"] 1792464509.85351 "%AUXDIR%/paper.aux" "%AUXDIR%/paper.bbl" "%AUXDIR%/paper" 1792464511.01489 2
-  "%AUXDIR%/paper.aux" 1792464510.69794 2498 2a8063761a0ab253465795e4bedbb12c "pdflatex"
-  "%AUXDIR%/table.aux" 1792464510.69783 950 52162f710ec699b6bcdd4c824e5c7296 "pdflatex"
+["bibtex %AUXDIR%/paper"] 1792464509.85351 "%AUXDIR%/paper.aux" "%AUXDIR%/paper.bbl" "%AUXDIR%/paper" 1792511099.26372 2
+  "%AUXDIR%/ex.aux" 1792511098.93237 761 0268e3ac1b0ef4ab2bfbdae75713ab4a "pdflatex"
+  "%AUXDIR%/paper.aux" 1792511098.9325 2414 c7bbe957b0415850109b0efe85fb5af0 "pdflatex"
+  "%AUXDIR%/table.aux" 1792511098.92871 948 142d3a3de06675bbe42f67f5b1de36d0 "pdflatex"
   "./refs.bib" 1791865083.19197 680 d1965586d79f9cdf56001ddaf1baebde ""
   "/usr/local/texlive/2026/texmf-dist/bibtex/bst/base/plain.bst" 1292289607 20613 bd3fbfa9f64872b81ac57a0dd2ed855f ""
   (generated)
   "%AUXDIR%/paper.bbl"
   "%AUXDIR%/paper.blg"
   (rewritten before read)
-["pdflatex"] 1792464510.09291 "/Users/SML161/latex_visual_editor/sample/paper.tex" "paper.pdf" "paper" 1792464511.01518 2
-  "%AUXDIR%/paper.aux" 1792464510.69794 2498 2a8063761a0ab253465795e4bedbb12c "pdflatex"
+["pdflatex"] 1792511098.25302 "/Users/SML161/latex_visual_editor/sample/paper.tex" "paper.pdf" "paper" 1792511099.26402 2
+  "%AUXDIR%/ex.aux" 1792511098.93237 761 0268e3ac1b0ef4ab2bfbdae75713ab4a "pdflatex"
+  "%AUXDIR%/ex.tex" 0 -1 0 ""
+  "%AUXDIR%/paper.aux" 1792511098.9325 2414 c7bbe957b0415850109b0efe85fb5af0 "pdflatex"
   "%AUXDIR%/paper.bbl" 1792464510.07916 523 c0eec9ec011cc5967f1c8c69d0a77fd7 "bibtex %AUXDIR%/paper"
-  "%AUXDIR%/paper.out" 1792464510.69799 336 5266d8c20c780d9da012bd0318e58c0a "pdflatex"
-  "%AUXDIR%/table.aux" 1792464510.69783 950 52162f710ec699b6bcdd4c824e5c7296 "pdflatex"
-  "/Users/SML161/latex_visual_editor/sample/paper.tex" 1792464509.70278 3894 9ffdaf99b77d4cdbe661bafe7a8b49ca ""
+  "%AUXDIR%/paper.out" 1792511098.93256 336 5266d8c20c780d9da012bd0318e58c0a "pdflatex"
+  "%AUXDIR%/table.aux" 1792511098.92871 948 142d3a3de06675bbe42f67f5b1de36d0 "pdflatex"
+  "/Users/SML161/latex_visual_editor/sample/paper.tex" 1792511098.11379 3982 d594e42563e575d35be919f62c61a0e7 ""
   "/usr/local/texlive/2026/texmf-dist/fonts/enc/dvips/cm-super/cm-super-ts1.enc" 1136849721 2900 1537cc8184ad1792082cd229ecc269f4 ""
   "/usr/local/texlive/2026/texmf-dist/fonts/map/fontname/texfonts.map" 1577235249 3524 cb3e574dea2d1052e39280babc910dc8 ""
   "/usr/local/texlive/2026/texmf-dist/fonts/tfm/jknappen/ec/tcrm0600.tfm" 1136768653 1536 12e8c510d3e158fdd0e9a42e75118bd9 ""
@@ -102,12 +105,14 @@
   "/usr/local/texlive/2026/texmf-var/fonts/map/pdftex/updmap/pdftex.map" 1775166941 5573038 b99aad5e4898a9034e953632f940512b ""
   "/usr/local/texlive/2026/texmf-var/web2c/pdftex/pdflatex.fmt" 1774209607 3636776 dc5fa9b6b1453b9d196cd42edf876004 ""
   "/usr/local/texlive/2026/texmf.cnf" 1774209515 577 648cd9f92f9c0eac486f4c71c85cfbbe ""
+  "ex.tex" 0 -1 0 ""
   "figures/signal.pdf" 1791865061.80365 10511 536274f25ebf51f4f7c87149578f2885 ""
   "figures/spectrum.png" 1791865061.96483 5133 ca3732e597ee310496ac3ce99d146f42 ""
   "paper.out" 1791908532.5843 336 5266d8c20c780d9da012bd0318e58c0a ""
-  "paper.tex" 1792464509.70278 3894 9ffdaf99b77d4cdbe661bafe7a8b49ca ""
+  "paper.tex" 1792511098.11379 3982 d594e42563e575d35be919f62c61a0e7 ""
   "table.tex" 1791908529.80538 228 2eb527a845874e36f082fbbbc84df3d0 ""
   (generated)
+  "%AUXDIR%/ex.aux"
   "%AUXDIR%/paper.aux"
   "%AUXDIR%/paper.log"
   "%AUXDIR%/paper.out"
