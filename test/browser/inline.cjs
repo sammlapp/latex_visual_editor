@@ -65,7 +65,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const live = await pg.evaluate(() => {
       const c = document.getElementById('doc').cloneNode(true);
       c.querySelectorAll('.add-block, .phantom, .editor').forEach((n) => n.remove());
-      c.querySelectorAll('.selected, .synced, .flash').forEach((n) => n.classList.remove('selected', 'synced', 'flash'));
+      c.querySelectorAll('.selected, .synced, .flash, .tab-active, .tab-cur').forEach((n) => n.classList.remove('selected', 'synced', 'flash', 'tab-active', 'tab-cur'));
       c.querySelectorAll('img[data-pdf]').forEach((n) => { n.removeAttribute('src'); n.classList.remove('loading'); });
       c.querySelectorAll('[class=""]').forEach((n) => n.removeAttribute('class'));
       return c.innerHTML;
@@ -327,6 +327,86 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sync();
   assert.ok(doc.includes('Specixyzal\\includegraphics{spectrum.png} relativity'), '14 path inserted: ' + JSON.stringify(doc.slice(doc.indexOf('Specixyzal'), doc.indexOf('Specixyzal') + 60)));
   await consistent('after file completion');
+
+  // 14b. Paste and cut arrive as clipboard events (VS Code uses execCommand) and edit the source.
+  await sync();
+  await caretAfter('Specixyzal');
+  await pg.evaluate(() => {
+    const dt = new DataTransfer();
+    dt.setData('text/plain', ' 50% more');
+    dt.setData('text/html', '<b>ignored</b>');
+    document.activeElement.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  });
+  await sync();
+  assert.ok(doc.includes('Specixyzal 50\\% more\\includegraphics'), '14b paste: ' + JSON.stringify(doc.slice(doc.indexOf('Specixyzal'), doc.indexOf('Specixyzal') + 40)));
+  await selectText(' more');
+  const cutText = await pg.evaluate(() => {
+    const dt = new DataTransfer();
+    document.activeElement.dispatchEvent(new ClipboardEvent('cut', { clipboardData: dt, bubbles: true, cancelable: true }));
+    return dt.getData('text/plain');
+  });
+  await sync();
+  assert.equal(cutText, ' more', '14b cut copies the text');
+  assert.ok(doc.includes('Specixyzal 50\\%\\includegraphics'), '14b cut removed it from the source');
+  await consistent('after paste/cut');
+
+  // 15. Table editing: the table bar appears in a cell, and edits rewrite the tabular.
+  await sync();
+  const tableSrc = () => doc.slice(doc.indexOf('\\begin{table}'), doc.indexOf('\\end{table}') + 11);
+  await caretAfter('Baseline');
+  await pg.waitForSelector('#table-bar:not([hidden])');
+  assert.ok(await pg.$eval('#table-bar [data-t="booktabs"]', (c) => c.checked), '15 booktabs detected');
+  assert.ok(await pg.$('table.tab-active td.tab-cur'), '15 grid shown on the active table');
+  await pg.click('#table-bar [data-t="row-below"]');
+  await pg.keyboard.type('New');
+  await pg.keyboard.press('Tab');
+  await pg.keyboard.type('x');
+  await sync();
+  assert.ok(tableSrc().includes('Baseline & 71.2 & 1.0 \\\\\n    New & x & \\\\\n    Ours'), '15 row inserted and filled: ' + JSON.stringify(tableSrc()));
+  await consistent('after row insert');
+  await pg.click('#table-bar [data-t="align-r"]');
+  await sync();
+  assert.ok(tableSrc().includes('\\begin{tabular}{lrc}'), '15 column right-aligned');
+  // Paste a 2×2 block copied from a spreadsheet into the new row's last cell: adds a column and a row.
+  await caretAfter('x', 'td .r');
+  await pg.keyboard.press('Tab');
+  await pg.evaluate(() => {
+    const dt = new DataTransfer();
+    dt.setData('text/plain', '5%\t6\n7\t8\n');
+    // A paste event without beforeinput, as VS Code's execCommand('paste') produces.
+    document.activeElement.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  });
+  await sync();
+  assert.ok(tableSrc().includes('{lrcc}') && tableSrc().includes('New & x & 5\\% & 6 \\\\\n    Ours & \\textbf{84.50} & 7 & 8 \\\\'), '15 pasted grid: ' + JSON.stringify(tableSrc()));
+  await consistent('after paste');
+  // Merge two cells by selecting across them, then split again.
+  await pg.evaluate(() => {
+    const runs = [...document.querySelectorAll('td .r')];
+    const a = runs.find((r) => r.textContent.trim() === 'New'); const b = runs.find((r) => r.textContent.trim() === 'x');
+    const range = document.createRange(); range.setStart(a.firstChild, 0); range.setEnd(b.firstChild, 1);
+    document.getElementById('doc').focus(); const s = getSelection(); s.removeAllRanges(); s.addRange(range);
+  });
+  await pg.click('#table-bar [data-t="merge"]');
+  await sync();
+  assert.ok(tableSrc().includes('\\multicolumn{2}{l}{New x} & 5\\%'), '15 merged: ' + tableSrc());
+  await pg.click('#table-bar [data-t="split"]');
+  await sync();
+  assert.ok(tableSrc().includes('New x & & 5\\%'), '15 split: ' + tableSrc());
+  await consistent('after merge/split');
+  // Float settings and longtable.
+  await pg.select('#table-bar select[data-t="size"]', 'small');
+  await sync();
+  assert.ok(tableSrc().includes('\\centering\n  \\small\n'), '15 font size: ' + tableSrc());
+  await consistent('after font size');
+  await caretAfter('Baseline');
+  await pg.click('#table-bar [data-t="longtable"]');
+  await sync();
+  assert.ok(doc.includes('\\usepackage{longtable}') && /\\begin\{longtable\}\{lrcc\}\n  \\caption\{[^}]*\}\n?\s*\\label\{tab:results\} \\\\/.test(doc), '15 longtable: ' + doc.slice(doc.indexOf('\\begin{longtable}'), doc.indexOf('\\begin{longtable}') + 120));
+  await consistent('after longtable');
+  await pg.click('#table-bar [data-t="longtable"]');
+  await sync();
+  assert.ok(/\\begin\{table\}\[htbp\]\n  \\centering\n  \\begin\{tabular\}\{lrcc\}/.test(doc) && !doc.includes('\\begin{longtable}'), '15 back to a float');
+  await consistent('after table float again');
 
   console.log(errs.length ? 'PAGE ERRORS:\n' + errs.join('\n') : 'no page errors');
   console.log('ALL INLINE CHECKS PASSED');

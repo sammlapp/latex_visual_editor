@@ -5,6 +5,11 @@
 - `\input` / `\include` files render inline, read-only, with an **Open ↗** button (or double-click) to
   edit them. Section, equation, figure and citation numbering continues across files, `\ref`s into
   included files resolve, and the view updates live as the included file changes.
+- Table editing: a contextual table bar to add/delete rows and columns, align and resize columns
+  (drag a column edge; text wraps), add or remove lines, merge and split cells, switch booktabs and
+  longtable on or off, and set font size, row spacing and column padding. Tab / Shift+Tab / Enter move
+  between cells, and cells pasted from Excel or Google Sheets fill the table. Needed packages are added to
+  the preamble.
 - File path completion in `\input`, `\include`, `\includegraphics`, `\bibliography`,
   `\addbibresource`, `\lstinputlisting` and similar, from the files in the document's folder (respecting
   `\graphicspath`, and dropping `.tex` / `.bib` where LaTeX expects that).

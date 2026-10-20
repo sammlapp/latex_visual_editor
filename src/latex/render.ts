@@ -6,6 +6,7 @@ import katex from 'katex';
 import { BibEntry, shortAuthors, splitAuthors } from './bib';
 import { CITE_COMMANDS, Ctx, findSubfigures } from './context';
 import { Block, ListItem, MATH_ENVS, parseBlocks } from './parser';
+import { floatSettings } from './table';
 import {
   escapeHtml,
   findEnvEnd,
@@ -295,13 +296,13 @@ export function regionTrim(t: string, s: number, e: number): { start: number; en
 
 /**
  * An editable text region (paragraph, heading title, caption, table cell...)
- * whose content maps to source [s, e). `prefix` is inserted before text typed
- * into an empty region (e.g. a space after \item).
+ * whose content maps to source [s, e). `prefix` and `suffix` surround text
+ * typed into an empty region (e.g. a space after \item, or before a cell's `&`).
  */
-function region(t: string, s: number, e: number, ctx: Ctx, footnotes: string[], kind: string, tag = 'span', cls = '', prefix = ''): string {
+function region(t: string, s: number, e: number, ctx: Ctx, footnotes: string[], kind: string, tag = 'span', cls = '', prefix = '', suffix = ''): string {
   const r = regionTrim(t, s, e);
   const inner = inline(t, r.start, r.end, { ctx, depth: 0, footnotes, mapped: true });
-  const pre = prefix ? ` data-prefix="${escapeHtml(prefix)}"` : '';
+  const pre = (prefix ? ` data-prefix="${escapeHtml(prefix)}"` : '') + (suffix && r.start === r.end ? ` data-suffix="${escapeHtml(suffix)}"` : '');
   return `<${tag} class="ed${cls ? ' ' + cls : ''}" contenteditable="true" data-region="${kind}" data-s="${r.start}" data-e="${r.end}"${pre}>${inner || '<br>'}</${tag}>`;
 }
 
@@ -721,13 +722,16 @@ function bibPlain(e: BibEntry): string {
 
 const UNIT_PX: Record<string, number> = { pt: 1.333, bp: 1.333, cm: 37.8, mm: 3.78, in: 96, em: 16, ex: 8, px: 1, pc: 16 };
 
-/** Converts a TeX length to CSS (relative widths become percentages). */
-export function texLengthToCss(v: string): string | undefined {
+/**
+ * Converts a TeX length to CSS. Relative widths become percentages of the
+ * container, or with `page` of the page's text width (table columns).
+ */
+export function texLengthToCss(v: string, page = false): string | undefined {
   v = v.trim();
   const m = /^([\d.]*)\s*\\(textwidth|linewidth|columnwidth|hsize|paperwidth|textheight)$/.exec(v);
   if (m) {
     const f = m[1] === '' ? 1 : parseFloat(m[1]);
-    return m[2] === 'textheight' ? `${Math.round(f * 900)}px` : `${+(f * 100).toFixed(2)}%`;
+    return m[2] === 'textheight' ? `${Math.round(f * 900)}px` : `${+(f * 100).toFixed(2)}${page ? 'cqw' : '%'}`;
   }
   const u = /^([\d.]+)\s*([a-z]{2})$/.exec(v);
   if (u && UNIT_PX[u[2]]) return `${Math.round(parseFloat(u[1]) * UNIT_PX[u[2]])}px`;
@@ -791,6 +795,8 @@ interface ColSpec {
 export function parseColSpec(spec: string): ColSpec[] {
   const cols: ColSpec[] = [];
   let pendingLeft = 0;
+  /** Alignment from a >{\centering\arraybackslash}-style prefix, for the next column. */
+  let pendingAlign: ColSpec['align'] | undefined;
   let i = 0;
   // Expand *{n}{spec}
   spec = spec.replace(/\*\s*\{(\d+)\}\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}/g, (_m, n, s) => s.repeat(Number(n)));
@@ -801,16 +807,22 @@ export function parseColSpec(spec: string): ColSpec[] {
       else pendingLeft++;
       i++;
     } else if ('lcrX'.includes(c) || c === 'S') {
-      cols.push({ align: c === 'X' ? 'j' : c === 'S' ? 'c' : (c as 'l' | 'c' | 'r'), borderLeft: cols.length ? 0 : pendingLeft, borderRight: 0 });
+      cols.push({ align: c === 'X' ? pendingAlign ?? 'j' : c === 'S' ? 'c' : (c as 'l' | 'c' | 'r'), borderLeft: cols.length ? 0 : pendingLeft, borderRight: 0 });
       pendingLeft = 0;
+      pendingAlign = undefined;
       i++;
     } else if (c === 'p' || c === 'm' || c === 'b') {
       const g = readGroup(spec, i + 1);
-      cols.push({ align: 'j', width: g ? texLengthToCss(spec.slice(g.innerStart, g.innerEnd)) : undefined, borderLeft: cols.length ? 0 : pendingLeft, borderRight: 0 });
+      cols.push({ align: pendingAlign ?? 'j', width: g ? texLengthToCss(spec.slice(g.innerStart, g.innerEnd), true) : undefined, borderLeft: cols.length ? 0 : pendingLeft, borderRight: 0 });
       pendingLeft = 0;
+      pendingAlign = undefined;
       i = g ? g.end : i + 1;
     } else if (c === '@' || c === '!' || c === '>' || c === '<') {
       const g = readGroup(spec, i + 1);
+      if (c === '>' && g) {
+        const cmd = /\\(centering|raggedleft|raggedright)/.exec(spec.slice(g.innerStart, g.innerEnd))?.[1];
+        if (cmd) pendingAlign = cmd === 'centering' ? 'c' : cmd === 'raggedleft' ? 'r' : 'l';
+      }
       i = g ? g.end : i + 1;
     } else if (c === '{') {
       const g = readGroup(spec, i);
@@ -879,7 +891,7 @@ function takeRules(t: string, s: number, e: number): { restStart: number; rules:
  * Renders a tabular-like environment whose body (column spec included) is
  * t[s, e). When `mapped`, each cell is an editable region.
  */
-export function renderTabular(t: string, s: number, e: number, env: string, ctx: Ctx, footnotes: string[] = [], mapped = true): string {
+export function renderTabular(t: string, s: number, e: number, env: string, ctx: Ctx, footnotes: string[] = [], mapped = true, capLabel = ''): string {
   let j = s;
   if (env === 'longtable') j = readArgs(t, j, 0, e, 1).end;
   if (env === 'tabular*' || env === 'tabularx') j = readArgs(t, j, 1, e, 0).end;
@@ -889,8 +901,12 @@ export function renderTabular(t: string, s: number, e: number, env: string, ctx:
   const spec = specGroup ? t.slice(specGroup.innerStart, specGroup.innerEnd) : '';
   const contentStart = specGroup ? specGroup.end : s;
   const cols = parseColSpec(spec);
-  const cellHtml = (a: number, b: number) =>
-    mapped ? region(t, a, b, ctx, footnotes, 'cell') : inline(t, a, b, { ctx, depth: 1, footnotes, mapped: false });
+  const cellHtml = (a: number, b: number) => {
+    if (!mapped) return inline(t, a, b, { ctx, depth: 1, footnotes, mapped: false });
+    // An empty cell written as `& &`: keep text typed into it apart from the next `&` / `\\`.
+    const at = regionTrim(t, a, b).start;
+    return region(t, a, b, ctx, footnotes, 'cell', 'span', '', t[at - 1] === '&' ? ' ' : '', t[at] === '&' || t[at] === '\\' ? ' ' : '');
+  };
 
   const rawRows = splitTopLevel(t.slice(contentStart, e), '\\\\').map((r) => ({ start: contentStart + r.start, end: contentStart + r.end }));
   const rows: { cells: { start: number; end: number }[]; rules: RowRules; bottom: number }[] = [];
@@ -970,7 +986,7 @@ export function renderTabular(t: string, s: number, e: number, env: string, ctx:
     for (let k = 0; k < occupied.length; k++) if (startOccupied[k] > 0) occupied[k] = startOccupied[k] - 1;
   }
   html += '</table>';
-  if (caption) html = `<div class="caption">${caption}</div>` + html;
+  if (caption) html = `<div class="caption">${capLabel ? `<span class="cap-label">${capLabel}</span> ` : ''}${caption}</div>` + html;
   return html;
 }
 
@@ -984,7 +1000,14 @@ function renderFloat(b: Block, ctx: Ctx, footnotes: string[]): string {
   // Skip the placement specifier, e.g. [htbp].
   const bodyStart = readArgs(ctx.text, b.innerStart!, 0, b.innerEnd!, 1).end;
   const body = renderFloatBody(ctx.text, bodyStart, b.innerEnd!, ctx, footnotes, (cap) => `<figcaption><span class="cap-label">${prefix} ${num}:</span> ${cap}</figcaption>`);
-  return `<figure class="float ${isFig ? 'fig' : 'tab'}">${body}</figure>`;
+  // Table settings (\small, \arraystretch, \tabcolsep) shown as font size and cell spacing.
+  const set = isFig ? {} : floatSettings(ctx.text, bodyStart, b.innerEnd!);
+  const styles: string[] = [];
+  if (set.size) styles.push(STYLE_SWITCH[set.size.value] ?? 'font-size:1em');
+  if (set.stretch && parseFloat(set.stretch.value)) styles.push(`--tab-stretch:${parseFloat(set.stretch.value)}`);
+  const colsep = set.colsep && texLengthToCss(set.colsep.value);
+  if (colsep) styles.push(`--tab-colsep:${colsep}`);
+  return `<figure class="float ${isFig ? 'fig' : 'tab'}"${styles.length ? ` style="${styles.join(';')}"` : ''}>${body}</figure>`;
 }
 
 function renderFloatBody(t: string, s: number, e: number, ctx: Ctx, footnotes: string[], captionFn: (html: string) => string): string {
@@ -1187,8 +1210,10 @@ function renderBlockInner(b: Block, ctx: Ctx, footnotes: string[]): string {
     case 'figure':
     case 'table':
       return `<div ${attrs(b, b.kind, '', false)}>${renderFloat(b, ctx, footnotes)}</div>`;
-    case 'tabular':
-      return `<div ${attrs(b, 'tabular', '', false)}><div class="float-row">${renderTabular(t, b.innerStart!, b.innerEnd!, b.name!, ctx, footnotes)}</div></div>`;
+    case 'tabular': {
+      const num = ctx.floatNums.get(b.start);
+      return `<div ${attrs(b, 'tabular', '', false)}><div class="float-row">${renderTabular(t, b.innerStart!, b.innerEnd!, b.name!, ctx, footnotes, true, num ? `Table ${num}:` : '')}</div></div>`;
+    }
     case 'verbatim': {
       let s = b.innerStart!;
       if (b.name === 'lstlisting' || b.name === 'minted') s = readArgs(t, s, b.name === 'minted' ? 1 : 0, b.innerEnd!, 1).end;

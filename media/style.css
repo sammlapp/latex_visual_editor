@@ -91,6 +91,8 @@ body.paper #page {
 }
 
 #doc {
+  /* Table column widths like p{0.3\linewidth} are sized against the text width (cqw). */
+  container-type: inline-size;
   font-family: var(--serif);
   font-size: 17px;
   line-height: 1.5;
@@ -181,7 +183,41 @@ figcaption .cap-label { font-weight: bold; }
 
 /* Tables */
 table.tabular { border-collapse: collapse; margin: 0 auto; font-size: 0.95em; }
-table.tabular td { padding: 3px 10px; vertical-align: top; }
+table.tabular td {
+  /* \arraystretch and \tabcolsep from the float, when set. */
+  padding: calc(3px + (var(--tab-stretch, 1) - 1) * 0.6em) var(--tab-colsep, 10px);
+  vertical-align: top;
+}
+table.tabular td > .ed { display: block; min-height: 1.3em; min-width: 1.5em; }
+
+/* Table being edited: a light grid shows every cell, including empty ones. */
+table.tabular.tab-active td { outline: 1px dashed var(--border); outline-offset: -1px; }
+table.tabular td.tab-cur { background: var(--hover); }
+#col-resizers { position: absolute; top: 0; left: 0; width: 0; height: 0; }
+.col-resizer { position: absolute; width: 6px; cursor: col-resize; z-index: 4; }
+.col-resizer:hover { background: var(--accent); opacity: 0.5; }
+
+#table-bar {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 12px;
+  background: var(--vscode-editorWidget-background, var(--bg));
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+}
+#table-bar[hidden] { display: none; }
+#table-bar .tb-title { font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 0.05em; font-size: 10px; }
+#table-bar svg.icon { display: block; margin: 1px 0; }
+#table-bar button.on { background: var(--btn-primary-bg); color: var(--btn-primary-fg); }
+#table-bar label { display: inline-flex; align-items: center; gap: 3px; color: var(--fg); cursor: pointer; }
+#table-bar select { font: inherit; font-size: 11px; background: var(--input-bg); color: var(--input-fg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 2px; }
+#table-bar select:disabled, #table-bar input:disabled { opacity: 0.45; }
 .amp { color: var(--muted); }
 
 /* Lists */

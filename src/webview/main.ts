@@ -11,6 +11,11 @@ import { Ctx, HostResources, buildContext } from '../latex/context';
 import { renderBlock, renderDocument, renderInline, renderRange, scanRun, stripTags } from '../latex/render';
 import { Block } from '../latex/parser';
 import { CompletionContext, CompletionItem, citationItems, completionAt, fileItems, filterCompletions, labelItems } from '../latex/complete';
+import {
+  Align, CellPos, SettingKey, TableModel, TextEdit, cellAt, cellPosAt, colInfo, deleteCol, deleteRow, ensurePackage, fillCells, findTableAt,
+  floatSettings, floatToLongtable, hasRule, insertCol, insertRow, isDataRow, longtableToFloat, mergeCells, parseTable, parseTsv,
+  serializeTable, setBooktabs, setColAlign, setColWidth, setFloatSetting, splitCell, tableContainer, toggleRule, usesBooktabs,
+} from '../latex/table';
 
 interface VsCodeApi {
   postMessage(msg: unknown): void;
@@ -248,6 +253,7 @@ function renderAll(caret: number | null = null) {
   } else if (caret !== null) {
     setCaret(caret);
   }
+  updateTableUi();
   vscode.postMessage({ type: 'rendered', stats: collectStats(performance.now() - t0) });
 }
 
@@ -574,10 +580,11 @@ function replaceRange(r: AbstractRange, ins: string): boolean {
   }
   const emptyRegion = m.regA.dataset.s === m.regA.dataset.e;
   const prefix = emptyRegion && m.a === Number(m.regA.dataset.s) ? m.regA.dataset.prefix ?? '' : '';
+  const suffix = emptyRegion && m.a === Number(m.regA.dataset.s) && ins ? m.regA.dataset.suffix ?? '' : '';
   const first = pieces[0][0];
   const last = pieces[pieces.length - 1][1];
   // Rebuild [first, last) with the pieces removed and the insertion at the front.
-  let mid = prefix + ins;
+  let mid = prefix + ins + suffix;
   let cursor = pieces[0][1];
   for (const [s, e] of pieces.slice(1)) {
     mid += text.slice(cursor, s);
@@ -625,6 +632,7 @@ function applyEdit(a: number, b: number, ins: string, caret: number, regionEl: H
         postRender(fresh);
         drawDiagnostics();
         setCaret(caret);
+        updateTableUi();
         updateToolbarState();
         return;
       }
@@ -693,6 +701,10 @@ function handleEnter(r: AbstractRange) {
   const atStart = text.slice(regStart, m.a).trim() === '';
   const blkEl = reg.closest<HTMLElement>('.blk')!;
   const item = reg.closest<HTMLElement>('li.item, .item');
+  if (kind === 'cell') {
+    moveInTable('down');
+    return;
+  }
 
   if (kind === 'p' && item && atEnd) {
     const itemStart = Number(item.dataset.start);
@@ -796,11 +808,9 @@ document.addEventListener('beforeinput', (e) => {
       replaceRange(target, escapeLatex(data));
       return;
     }
-    case 'insertFromPaste': {
-      const data = (e.dataTransfer?.getData('text/plain') ?? '').replace(/\r\n?/g, '\n');
-      replaceRange(target, escapeLatex(data).replace(/\n{3,}/g, '\n\n'));
+    case 'insertFromPaste':
+      pastePlain(target, e.dataTransfer?.getData('text/plain') ?? '');
       return;
-    }
     case 'insertParagraph':
       handleEnter(target);
       return;
@@ -834,6 +844,39 @@ document.addEventListener('beforeinput', (e) => {
       requestHistory('redo');
       return;
   }
+});
+
+/** Pastes clipboard text as literal text; cells copied from a spreadsheet fill the table from the current cell. */
+function pastePlain(target: AbstractRange, raw: string) {
+  const data = raw.replace(/\r\n?/g, '\n');
+  if (regionOf(target.startContainer)?.dataset.region === 'cell') {
+    const grid = parseTsv(data.replace(/\n+$/, ''));
+    if (grid.length > 1 || (grid[0]?.length ?? 0) > 1) {
+      tableCaret = mapRange(target)?.a ?? tableCaret;
+      tableOp((m, pos) => ({ focus: fillCells(m, pos, grid.map((row) => row.map(escapeLatex))) }));
+      return;
+    }
+  }
+  replaceRange(target, escapeLatex(data).replace(/\n{3,}/g, '\n\n'));
+}
+
+// VS Code pastes and cuts in webviews with document.execCommand, which fires
+// paste / cut events but no beforeinput, and would edit the DOM directly
+// (pasting HTML) without touching the source. Handle both here.
+document.addEventListener('paste', (e) => {
+  if (!root.contains(e.target as Node) || isSourceUi(e.target)) return;
+  e.preventDefault();
+  const sel = window.getSelection();
+  if (!sel?.rangeCount || !regionOf(sel.getRangeAt(0).startContainer)) return;
+  pastePlain(sel.getRangeAt(0), e.clipboardData?.getData('text/plain') ?? '');
+});
+document.addEventListener('cut', (e) => {
+  if (!root.contains(e.target as Node) || isSourceUi(e.target)) return;
+  const sel = window.getSelection();
+  if (!sel?.rangeCount || sel.isCollapsed) return;
+  e.preventDefault();
+  e.clipboardData?.setData('text/plain', sel.toString());
+  replaceRange(sel.getRangeAt(0), '');
 });
 
 // IME composition can't be cancelled: let the browser draw it, then commit it as an edit.
@@ -887,6 +930,8 @@ document.addEventListener('keydown', (e) => {
     openInsertPopover(r, `$${inner}$`, inner ? inner.length + 1 : 1);
   } else if (e.key === 'Tab') {
     e.preventDefault();
+    const sel = window.getSelection();
+    if (sel?.rangeCount && regionOf(sel.focusNode)?.dataset.region === 'cell') moveInTable(e.shiftKey ? 'prev' : 'next');
   }
 });
 
@@ -1046,10 +1091,16 @@ root.addEventListener('click', (e) => {
   if (sourceEd) {
     // Clicking elsewhere finishes the source edit, then continues the click.
     const { clientX, clientY } = e;
-    const isl = target.closest<HTMLElement>('.isl, .blk[contenteditable="false"]');
+    const inTable = !target.closest('.isl') && !!tableBlockOf(target);
+    const isl = inTable ? null : target.closest<HTMLElement>('.isl, .blk[contenteditable="false"]');
     const start = isl ? remap(Number(isl.dataset.start)) : null;
     closeEditor();
-    if (start !== null) {
+    if (inTable) {
+      // The table was re-rendered: find it again under the pointer.
+      const again = document.elementFromPoint(clientX, clientY);
+      const tbl = again && tableBlockOf(again as HTMLElement);
+      if (tbl) focusNearestRegion(tbl, clientX, clientY);
+    } else if (start !== null) {
       const el = elementForOffset(start, true);
       if (el) openEditor(el);
     } else {
@@ -1073,6 +1124,12 @@ root.addEventListener('click', (e) => {
     fixCaretAfterClick(e.clientX, e.clientY);
     return;
   }
+  // Anywhere else in a table (cell padding, rules, caption label) goes to the nearest cell, not the source.
+  const tbl = tableBlockOf(target);
+  if (tbl) {
+    focusNearestRegion(tbl, e.clientX, e.clientY);
+    return;
+  }
   const blk = target.closest<HTMLElement>('.blk[contenteditable="false"]');
   if (blk) {
     openEditor(blk);
@@ -1086,6 +1143,37 @@ root.addEventListener('dblclick', (e) => {
   const open = body?.parentElement?.querySelector<HTMLElement>(':scope > .include-bar > .open-file');
   if (open) vscode.postMessage({ type: 'openFile', file: open.dataset.file });
 });
+
+/** The table block (float or bare tabular) containing `el`, when it has editable cells. */
+function tableBlockOf(el: HTMLElement): HTMLElement | null {
+  const blk = el.closest<HTMLElement>('.blk-table, .blk-tabular');
+  return blk && root.contains(blk) && blk.querySelector('.ed[data-region="cell"]') ? blk : null;
+}
+
+/** Puts the caret in the text region (cell or caption) of `blk` nearest to a point. */
+function focusNearestRegion(blk: HTMLElement, x: number, y: number) {
+  let best: HTMLElement | null = null;
+  let bestD = Infinity;
+  blk.querySelectorAll<HTMLElement>('.ed').forEach((reg) => {
+    const r = (reg.closest('td') ?? reg).getBoundingClientRect();
+    const dx = Math.max(r.left - x, 0, x - r.right);
+    const dy = Math.max(r.top - y, 0, y - r.bottom);
+    const d = dx * dx + dy * dy;
+    if (d < bestD) {
+      bestD = d;
+      best = reg;
+    }
+  });
+  const reg = best as HTMLElement | null;
+  if (!reg) return;
+  const pos = document.caretRangeFromPoint?.(x, y);
+  if (pos && regionOf(pos.startContainer) === reg) {
+    root.focus({ preventScroll: true });
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(pos);
+  } else setCaret(Number(reg.dataset.e));
+}
 
 /**
  * Browsers sometimes resolve a click beside non-editable content to a caret
@@ -1397,6 +1485,7 @@ function buildToolbar(): HTMLElement {
     const btn = (e.target as HTMLElement).closest('button');
     if (!btn || btn.disabled) return;
     const ins = btn.dataset.insert;
+    if (ins === 'table') return insertTable();
     if (ins) return insertBlock(TEMPLATES[ins]);
     switch (btn.dataset.action) {
       case 'text': {
@@ -1644,6 +1733,386 @@ function attachCompletion(ta: HTMLTextAreaElement, onAccept?: (mode: 'enter' | '
   });
   return () => list.remove();
 }
+
+// ---------------------------------------------------------------------------
+// Table editing. While the caret is in a table cell, a table bar offers
+// structural edits; each rewrites the table environment from a parsed model
+// (cell contents are kept as written) in one undoable edit.
+
+const tableBar = buildTableBar();
+toolbar.appendChild(tableBar);
+const resizeLayer = document.createElement('div');
+resizeLayer.id = 'col-resizers';
+page.appendChild(resizeLayer);
+/** Source offset of the caret in the active table's cell (kept while the table bar has focus). */
+let tableCaret: number | null = null;
+
+interface TableOpResult {
+  focus?: CellPos | null;
+  packages?: string[];
+}
+
+function currentTable(): { m: TableModel; pos: CellPos & { index: number } } | null {
+  if (tableCaret === null) return null;
+  const m = findTableAt(text, tableCaret);
+  const pos = m && cellPosAt(m, tableCaret);
+  return m && pos ? { m, pos } : null;
+}
+
+/** Applies a structural change to the table at the caret and puts the caret in the cell it returns. */
+function tableOp(fn: (m: TableModel, pos: CellPos & { index: number }) => TableOpResult | null) {
+  flushWin();
+  if (tableCaret === null) {
+    const c = caretSource();
+    if (c !== null) tableCaret = c;
+  }
+  const cur = currentTable();
+  if (!cur) return;
+  const res = fn(cur.m, cur.pos);
+  if (!res) return;
+  const out = serializeTable(cur.m);
+  const focus = res.focus ?? cur.pos;
+  const row = cur.m.rows[Math.min(focus.row, cur.m.rows.length - 1)];
+  const c = row && isDataRow(row) ? cellAt(row, Math.min(focus.col, Math.max(0, row.cells.reduce((n, x) => n + x.span, 0) - 1))) : null;
+  const off = c ? out.cells[cur.m.rows.indexOf(row)][c.index] : undefined;
+  const caret = cur.m.start + (off !== undefined ? off + row.cells[c!.index].src.length : 0);
+  commitTableEdit({ start: cur.m.start, end: cur.m.end, text: out.src }, caret, res.packages);
+}
+
+/** Applies `main`, then adds any missing packages to the preamble (before it), keeping the caret in place. */
+function commitTableEdit(main: TextEdit, caret: number, packages: string[] = []) {
+  if (sourceEd) closeEditor();
+  localEdit(main.start, main.end, main.text);
+  flushWin();
+  for (const pkg of packages) {
+    const e = ensurePackage(text, pkg);
+    if (!e || e.start > main.start) continue;
+    localEdit(e.start, e.end, e.text);
+    flushWin();
+    caret += e.text.length - (e.end - e.start);
+  }
+  tableCaret = caret;
+  renderAll(caret);
+}
+
+/** Tab / Shift+Tab / Enter navigation between cells. Tab in the last cell adds a row. */
+function moveInTable(dir: 'next' | 'prev' | 'down') {
+  flushWin();
+  tableCaret = caretSource();
+  const cur = currentTable();
+  if (!cur) return;
+  const { m, pos } = cur;
+  const go = (row: number, index: number) => {
+    const cell = m.rows[row].cells[index];
+    tableCaret = cell.end;
+    setCaret(cell.end);
+  };
+  if (dir === 'down') {
+    for (let r = pos.row + 1; r < m.rows.length; r++) {
+      const c = isDataRow(m.rows[r]) ? cellAt(m.rows[r], pos.col) : null;
+      if (c) return go(r, c.index);
+    }
+    return;
+  }
+  const order: [number, number][] = [];
+  m.rows.forEach((r, k) => isDataRow(r) && r.cells.forEach((_c, i) => order.push([k, i])));
+  const at = order.findIndex(([r, i]) => r === pos.row && i === pos.index);
+  const next = order[at + (dir === 'next' ? 1 : -1)];
+  if (next) go(next[0], next[1]);
+  else if (dir === 'next') tableOp((mm, p) => ({ focus: insertRow(mm, p.row, true) }));
+}
+
+/** Logical columns covered by the current selection, when it spans cells of one row. */
+function selectedCells(m: TableModel): { row: number; from: number; to: number } | null {
+  const sel = window.getSelection();
+  if (!sel?.rangeCount || sel.isCollapsed) return null;
+  const r = sel.getRangeAt(0);
+  const a = regionOf(r.startContainer);
+  const b = regionOf(r.endContainer);
+  if (a?.dataset.region !== 'cell' || b?.dataset.region !== 'cell' || a === b) return null;
+  const pa = cellPosAt(m, Number(a.dataset.s));
+  const pb = cellPosAt(m, Number(b.dataset.s));
+  if (!pa || !pb || pa.row !== pb.row) return null;
+  return { row: pa.row, from: Math.min(pa.col, pb.col), to: Math.max(pa.col, pb.col) };
+}
+
+const INITIAL_TABLE = [
+  '\\begin{table}[htbp]',
+  '  \\centering',
+  '  \\begin{tabular}{lll}',
+  '    \\toprule',
+  '    Column 1 & Column 2 & Column 3 \\\\',
+  '    \\midrule',
+  '    & & \\\\',
+  '    & & \\\\',
+  '    \\bottomrule',
+  '  \\end{tabular}',
+  '  \\caption{Caption.}',
+  '  \\label{tab:new}',
+  '\\end{table}',
+].join('\n');
+
+/** Inserts a booktabs table after the current block and selects its first header cell. */
+function insertTable() {
+  if (sourceEd) closeEditor();
+  flushWin();
+  if (!ctx) ctx = buildContext(text, host);
+  const pos = insertionPoint();
+  const before = text.slice(0, pos);
+  const after = text.slice(pos);
+  const lead = before.endsWith('\n\n') ? '' : before.endsWith('\n') ? '\n' : '\n\n';
+  const trail = after.startsWith('\n\n') ? '' : after.startsWith('\n') ? '\n' : '\n\n';
+  const cell = pos + lead.length + INITIAL_TABLE.indexOf('Column 1');
+  commitTableEdit({ start: pos, end: pos, text: lead + INITIAL_TABLE + trail }, cell + 'Column 1'.length, ['booktabs']);
+  const region = root.querySelector<HTMLElement>(`.ed[data-region="cell"][data-e="${tableCaret}"]`);
+  if (region) {
+    const range = document.createRange();
+    range.selectNodeContents(region);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+}
+
+function alignIcon(d: string): string {
+  return `<svg class="icon" viewBox="0 0 14 12" width="14" height="12"><path d="${d}" stroke="currentColor" stroke-width="1.6" fill="none"/></svg>`;
+}
+
+function buildTableBar(): HTMLElement {
+  const bar = document.createElement('div');
+  bar.id = 'table-bar';
+  bar.hidden = true;
+  const opt = (pairs: [string, string][]) => pairs.map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+  bar.innerHTML = `
+    <span class="tb-title">Table</span>
+    <span class="tb-group">
+      <button data-t="row-above" title="Insert a row above">+ Row ↑</button>
+      <button data-t="row-below" title="Insert a row below (Tab in the last cell also adds one)">+ Row ↓</button>
+      <button data-t="row-del" title="Delete this row">− Row</button>
+    </span>
+    <span class="tb-group">
+      <button data-t="col-left" title="Insert a column to the left">+ Col ←</button>
+      <button data-t="col-right" title="Insert a column to the right">+ Col →</button>
+      <button data-t="col-del" title="Delete this column">− Col</button>
+    </span>
+    <span class="tb-group">
+      <button data-t="align-l" title="Align column left">${alignIcon('M1 2h12M1 6h8M1 10h10')}</button>
+      <button data-t="align-c" title="Center column">${alignIcon('M1 2h12M3 6h8M2 10h10')}</button>
+      <button data-t="align-r" title="Align column right">${alignIcon('M1 2h12M5 6h8M3 10h10')}</button>
+      <button data-t="wrap" title="Wrap text in this column at a fixed width (drag the column's right edge to resize)">↵ Wrap</button>
+    </span>
+    <span class="tb-group">
+      <button data-t="rule-above" title="Line above this row">▔ Line</button>
+      <button data-t="rule-below" title="Line below this row">▁ Line</button>
+    </span>
+    <span class="tb-group">
+      <button data-t="merge" title="Merge the selected cells of this row">Merge</button>
+      <button data-t="split" title="Split this merged cell">Split</button>
+    </span>
+    <span class="tb-group tb-settings">
+      <label title="Professional rules (\\toprule, \\midrule, \\bottomrule; booktabs package), no vertical lines"><input type="checkbox" data-t="booktabs"> booktabs</label>
+      <label title="longtable: the table can break across pages (not a float)"><input type="checkbox" data-t="longtable"> long</label>
+      <select data-t="size" title="Font size">${opt([['', 'Font: normal'], ['small', 'small'], ['footnotesize', 'footnotesize'], ['scriptsize', 'scriptsize'], ['tiny', 'tiny']])}</select>
+      <select data-t="stretch" title="Row spacing (\\arraystretch)">${opt([['', 'Rows: 1'], ['1.15', '1.15'], ['1.3', '1.3'], ['1.5', '1.5'], ['2', '2']])}</select>
+      <select data-t="colsep" title="Space between columns (\\tabcolsep)">${opt([['', 'Columns: 6pt'], ['2pt', '2pt'], ['4pt', '4pt'], ['8pt', '8pt'], ['12pt', '12pt']])}</select>
+    </span>
+    <button data-t="source" title="Edit the table's LaTeX">&lt;/&gt;</button>`;
+  bar.addEventListener('mousedown', (e) => {
+    // Keep the caret in the cell (selects still need focus to open).
+    if (!(e.target as HTMLElement).closest('select')) e.preventDefault();
+  });
+  bar.addEventListener('click', (e) => {
+    const el = (e.target as HTMLElement).closest<HTMLElement>('button[data-t], input[data-t]');
+    if (!el || (el as HTMLButtonElement).disabled) return;
+    if (el instanceof HTMLInputElement) {
+      if (el.dataset.t === 'booktabs') tableOp((m) => (setBooktabs(m, el.checked), { packages: el.checked ? ['booktabs'] : [] }));
+      else toggleLongtable(el.checked);
+      return;
+    }
+    runTableButton(el.dataset.t!);
+  });
+  bar.addEventListener('change', (e) => {
+    const el = e.target as HTMLSelectElement;
+    if (el.tagName === 'SELECT') setTableSetting(el.dataset.t as SettingKey, el.value || null);
+  });
+  return bar;
+}
+
+function runTableButton(action: string) {
+  if (action === 'source') {
+    const cur = currentTable();
+    const el = cur && root.querySelector<HTMLElement>(`.blk[data-start="${(ctx && tableContainer(ctx.doc.blocks, cur.m)?.start) ?? -1}"]`);
+    const blk = el ?? (tableCaret !== null ? elementForOffset(tableCaret)?.closest<HTMLElement>('.blk') : null);
+    if (blk) openEditor(blk);
+    return;
+  }
+  tableOp((m, pos): TableOpResult | null => {
+    switch (action) {
+      case 'row-above':
+        return { focus: insertRow(m, pos.row, false) };
+      case 'row-below':
+        return { focus: insertRow(m, pos.row, true) };
+      case 'row-del':
+        return deleteRow(m, pos.row) && { focus: { row: Math.min(pos.row, m.rows.length - 1), col: pos.col } };
+      case 'col-left':
+        return { focus: { row: pos.row, col: insertCol(m, pos.col, false).col } };
+      case 'col-right':
+        return { focus: { row: pos.row, col: insertCol(m, pos.col, true).col } };
+      case 'col-del':
+        return deleteCol(m, pos.col) && { focus: { row: pos.row, col: Math.min(pos.col, m.cols.length - 1) } };
+      case 'align-l':
+      case 'align-c':
+      case 'align-r':
+        return { packages: setColAlign(m, pos.col, action.slice(-1) as Align) ? ['array'] : [] };
+      case 'wrap': {
+        if (colInfo(m.cols[pos.col] ?? { pre: '', core: 'l' }).width) return { packages: setColWidth(m, pos.col, null) ? ['array'] : [] };
+        // Start from the column's current rendered width.
+        const td = root.querySelector<HTMLElement>(`.ed[data-region="cell"][data-s="${m.rows[pos.row].cells[pos.index].start}"]`)?.closest('td');
+        const frac = td ? Math.min(0.9, Math.max(0.1, Math.round((td.getBoundingClientRect().width / root.clientWidth) * 20) / 20)) : 0.3;
+        return { packages: setColWidth(m, pos.col, `${frac}\\linewidth`) ? ['array'] : [] };
+      }
+      case 'rule-above':
+        return { packages: toggleRule(m, pos.row) ? ['booktabs'] : [] };
+      case 'rule-below':
+        return { packages: toggleRule(m, pos.row + 1) ? ['booktabs'] : [] };
+      case 'merge': {
+        const s = selectedCells(m);
+        return s && mergeCells(m, s.row, s.from, s.to) && { focus: { row: s.row, col: s.from } };
+      }
+      case 'split':
+        return splitCell(m, pos.row, pos.col) && {};
+    }
+    return null;
+  });
+}
+
+function setTableSetting(key: SettingKey, value: string | null) {
+  flushWin();
+  const cur = currentTable();
+  const float = cur && ctx ? tableContainer(ctx.doc.blocks, cur.m) : undefined;
+  if (!cur || float?.kind !== 'table') return;
+  const edit = setFloatSetting(text, float, key, value);
+  if (!edit) return;
+  // Settings sit above the tabular, so the caret moves by the edit's length.
+  commitTableEdit(edit, tableCaret! + edit.text.length - (edit.end - edit.start));
+}
+
+/** Converts between a table float and a longtable, keeping the caret in the same cell. */
+function toggleLongtable(on: boolean) {
+  flushWin();
+  const cur = currentTable();
+  if (!cur || !ctx) return;
+  const { m, pos } = cur;
+  const dataRow = m.rows.slice(0, pos.row).filter(isDataRow).length;
+  let edit: TextEdit | null;
+  if (on) {
+    const float = tableContainer(ctx.doc.blocks, m);
+    edit = float?.kind === 'table' ? floatToLongtable(text, float, m) : null;
+  } else edit = m.env === 'longtable' ? longtableToFloat(text, m) : null;
+  if (!edit) return;
+  const newText = text.slice(0, edit.start) + edit.text + text.slice(edit.end);
+  const begin = newText.slice(edit.start).search(/\\begin\{(longtable|tabular)\}/);
+  const nm = begin === -1 ? null : parseTable(newText, edit.start + begin);
+  const row = nm?.rows.filter(isDataRow)[dataRow];
+  const cell = row?.cells[Math.min(pos.index, row.cells.length - 1)];
+  commitTableEdit(edit, cell ? cell.end : edit.start, on ? ['longtable'] : []);
+}
+
+/** Shows the table bar, grid and column handles for the table holding the caret. */
+function updateTableUi() {
+  const sel = window.getSelection();
+  const reg = sel?.rangeCount && root.contains(sel.focusNode) ? regionOf(sel.focusNode) : null;
+  if (reg?.dataset.region === 'cell' && !sourceEd) {
+    tableCaret = caretSource() ?? Number(reg.dataset.s);
+  } else if (!tableBar.contains(document.activeElement)) {
+    tableCaret = null;
+  }
+  const cur = currentTable();
+  root.querySelectorAll('.tab-active, .tab-cur').forEach((el) => el.classList.remove('tab-active', 'tab-cur'));
+  resizeLayer.innerHTML = '';
+  tableBar.hidden = !cur;
+  if (!cur) return;
+  const { m, pos } = cur;
+  const td = root.querySelector<HTMLElement>(`.ed[data-region="cell"][data-s="${m.rows[pos.row].cells[pos.index].start}"]`)?.closest('td');
+  const table = td?.closest<HTMLElement>('table.tabular');
+  table?.classList.add('tab-active');
+  td?.classList.add('tab-cur');
+
+  const info = colInfo(m.cols[pos.col] ?? { pre: '', core: 'l' });
+  const set = (t: string, on: boolean, disabled = false) => {
+    const el = tableBar.querySelector<HTMLButtonElement | HTMLInputElement>(`[data-t="${t}"]`)!;
+    if (el instanceof HTMLInputElement) el.checked = on;
+    else el.classList.toggle('on', on);
+    el.disabled = disabled;
+  };
+  const cell = m.rows[pos.row].cells[pos.index];
+  const dataRows = m.rows.filter(isDataRow).length;
+  for (const a of ['l', 'c', 'r']) set(`align-${a}`, info.align === a, !m.cols[pos.col]);
+  set('wrap', !!info.width, !m.cols[pos.col] || m.cols[pos.col].core === 'X');
+  set('rule-above', hasRule(m, pos.row));
+  set('rule-below', hasRule(m, pos.row + 1));
+  set('row-del', false, dataRows <= 1);
+  set('col-del', false, m.cols.length <= 1);
+  set('merge', false, !selectedCells(m));
+  set('split', false, cell.span <= 1 && cell.mcSpec === undefined);
+  set('booktabs', usesBooktabs(m));
+  const container = ctx ? tableContainer(ctx.doc.blocks, m) : undefined;
+  const inFloat = container?.kind === 'table';
+  set('longtable', m.env === 'longtable', !(m.env === 'longtable' || (inFloat && m.env === 'tabular')));
+  const settings = inFloat ? floatSettings(text, container!.innerStart!, container!.innerEnd!) : {};
+  for (const key of ['size', 'stretch', 'colsep'] as const) {
+    const sel = tableBar.querySelector<HTMLSelectElement>(`select[data-t="${key}"]`)!;
+    const v = settings[key]?.value ?? '';
+    if (v && ![...sel.options].some((o) => o.value === v)) sel.add(new Option(v, v));
+    sel.value = v;
+    sel.disabled = !inFloat;
+    sel.title = inFloat ? sel.title.replace(/ —.*$/, '') : `${sel.title.replace(/ —.*$/, '')} — only for tables in a table float`;
+  }
+  if (table) drawResizers(m, table);
+}
+
+/** Drag handles on column edges; dragging gives the column a wrapping width. */
+function drawResizers(m: TableModel, table: HTMLElement) {
+  // Use a row of single cells so each td is one column.
+  const tr = [...table.querySelectorAll('tr')].find((r) => r.children.length === m.cols.length && ![...r.children].some((c) => (c as HTMLTableCellElement).colSpan > 1));
+  if (!tr) return;
+  const pr = page.getBoundingClientRect();
+  const tr0 = table.getBoundingClientRect();
+  [...tr.children].forEach((cell, col) => {
+    const r = cell.getBoundingClientRect();
+    const h = document.createElement('div');
+    h.className = 'col-resizer';
+    h.title = 'Drag to set the column width (text wraps); double-click for natural width';
+    Object.assign(h.style, { left: `${r.right - pr.left - 3}px`, top: `${tr0.top - pr.top}px`, height: `${tr0.height}px` });
+    h.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const tds = [...table.querySelectorAll('tr')].map((row) => row.children[col] as HTMLElement | undefined).filter((x): x is HTMLElement => !!x && (x as HTMLTableCellElement).colSpan === 1);
+      const startX = e.clientX;
+      const startW = r.width;
+      let w = startW;
+      const move = (ev: MouseEvent) => {
+        w = Math.max(24, startW + ev.clientX - startX);
+        tds.forEach((td) => (td.style.width = `${w}px`));
+        h.style.left = `${r.left - pr.left + w - 3}px`;
+        h.dataset.width = `${(w / root.clientWidth).toFixed(2)}\\linewidth`;
+      };
+      const up = () => {
+        window.removeEventListener('mousemove', move);
+        window.removeEventListener('mouseup', up);
+        if (Math.abs(w - startW) < 2) return;
+        const frac = Math.min(1, Math.max(0.03, w / root.clientWidth)).toFixed(2);
+        tableOp((mm) => ({ packages: setColWidth(mm, col, `${frac}\\linewidth`) ? ['array'] : [] }));
+      };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+    });
+    h.addEventListener('dblclick', () => tableOp((mm) => ({ packages: setColWidth(mm, col, null) ? ['array'] : [] })));
+    resizeLayer.appendChild(h);
+  });
+}
+
+document.addEventListener('selectionchange', () => updateTableUi());
+window.addEventListener('resize', () => updateTableUi());
 
 // ---------------------------------------------------------------------------
 // Diagnostics from language servers (LTeX, cSpell…), drawn as underlines with

@@ -63,7 +63,24 @@ are suggested, filtered to the right kind (`.tex`, images, `.bib`…). Paths are
 written the way LaTeX expects: `\input` and `\bibliography` without the
 extension, and figures relative to your `\graphicspath` when there is one.
 
-**Math, figures, tables and everything else.** Click an equation, figure or
+**Tables.** Click into any cell and type; Tab / Shift+Tab move between cells
+(Tab in the last cell adds a row) and Enter moves down. While the cursor is in a
+table, a **Table** bar offers:
+
+- add / delete rows and columns, column alignment, and **Wrap** (a fixed column
+  width with wrapping text — or drag a column's right edge to resize it);
+- lines above / below a row, and merging the selected cells of a row
+  (`\multicolumn`) or splitting them again;
+- **booktabs** rules (`\toprule`, `\midrule`, `\bottomrule`; new tables use them),
+  **long** to turn the table into a `longtable` that can break across pages, and
+  font size, row spacing (`\arraystretch`) and column padding (`\tabcolsep`).
+
+Paste cells copied from Excel or Google Sheets into a cell to fill the table from
+there (it grows as needed). Needed packages (`booktabs`, `longtable`, `array`) are
+added to the preamble for you. Each change rewrites only that table's LaTeX, in
+one undoable step.
+
+**Math, figures and everything else.** Click an equation, figure or
 table (or inline math) to edit its source with a live preview. Hover any block
 and click **`</>`** at its left to edit its full LaTeX source. Click a
 reference or citation to jump to its target (⌥/Alt+click to edit it).
@@ -102,7 +119,8 @@ replacements or *Add to dictionary*. The checker must be checking the `.tex` fil
 ## Known limitations
 
 - Math is edited in a source popover rather than typed in place.
-- Changing a table's structure (rows, columns, rules) uses the source editor.
+- Table cells merge across columns only (`\multirow` tables render but can't be merged from the table bar).
+- Font size, row spacing and padding apply to tables in a `table` float, not to `longtable`s.
 - `\input` / `\include` files are read-only in the visual view; open them to edit.
 - Problems are underlined only in editable text (not inside math or included files).
 - EPS figures show a placeholder.

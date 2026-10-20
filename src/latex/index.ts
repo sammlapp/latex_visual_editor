@@ -4,3 +4,4 @@ export * from './context';
 export * from './render';
 export * from './bib';
 export * from './complete';
+export * from './table';

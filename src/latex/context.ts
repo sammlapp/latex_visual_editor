@@ -419,6 +419,15 @@ class Numberer {
         }
         break;
       }
+      case 'tabular':
+        // A longtable with a caption is numbered like a table float.
+        if (b.name === 'longtable' && /\\caption\b/.test(t.slice(b.innerStart!, b.innerEnd!))) {
+          const num = this.chapterPrefix() + ++this.tab;
+          this.ctx.floatNums.set(b.start, num);
+          this.lastRef = num;
+          for (const l of findLabels(t, b.innerStart!, b.innerEnd!)) this.label(l.key, num, 'table', b.start);
+        }
+        break;
       case 'list': {
         const enumerate = b.name === 'enumerate';
         this.listDepth++;

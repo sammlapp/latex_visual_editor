@@ -275,3 +275,127 @@ test('file completion for \\input, \\includegraphics and \\bibliography', () => 
   assert.deepEqual(keys('addbibresource', ''), ['refs.bib']);
   assert.ok(keys('lstinputlisting', 'notes').includes('notes.txt'));
 });
+
+test('table model: parse, edit and write back tabular environments', () => {
+  const src = [
+    '\\documentclass{article}',
+    '\\usepackage{amsmath}',
+    '\\begin{document}',
+    '\\begin{table}[htbp]',
+    '  \\centering',
+    '  \\begin{tabular}{l|cc}',
+    '    \\toprule',
+    '    Method & A & B \\\\',
+    '    \\midrule',
+    '    \\multicolumn{2}{c}{Both} & 3 \\\\',
+    '    Ours % best',
+    '    & 1 & 2 \\\\[2pt]',
+    '    \\bottomrule',
+    '  \\end{tabular}',
+    '  \\caption{Results.}\\label{tab:r}',
+    '\\end{table}',
+    '\\end{document}',
+  ].join('\n');
+  const at = src.indexOf('Both');
+  const m = L.findTableAt(src, at);
+  assert.equal(m.env, 'tabular');
+  assert.deepEqual(m.cols.map((c) => c.pre + c.core), ['l', '|c', 'c']);
+  assert.deepEqual(m.rows.map((r) => r.cells.map((c) => c.src)), [['Method', 'A', 'B'], ['Both', '3'], ['Ours % best', '1', '2']]);
+  assert.deepEqual(m.rows.map((r) => r.pre), ['\\toprule', '\\midrule', '']);
+  assert.equal(m.rows[2].end, '\\\\[2pt]');
+  assert.equal(m.tail, '\\bottomrule');
+  assert.deepEqual(L.cellPosAt(m, at), { row: 1, col: 0, index: 0 });
+  assert.equal(src.slice(m.rows[0].cells[1].start, m.rows[0].cells[1].end), 'A');
+
+  // Writing back keeps every cell, and a comment never swallows the next cell or the row end.
+  const out = L.serializeTable(m);
+  const again = L.parseTable(out.src, 0);
+  assert.deepEqual(again.rows.map((r) => r.cells.map((c) => c.src)), m.rows.map((r) => r.cells.map((c) => c.src)));
+  assert.match(out.src, /Ours % best\n\s+& 1 & 2 \\\\\[2pt\]/);
+  assert.equal(out.src.slice(out.cells[1][1], out.cells[1][1] + 1), '3', 'cell offsets point at the contents');
+  assert.ok(out.src.startsWith('\\begin{tabular}{l|cc}\n    \\toprule\n    Method & A & B \\\\\n'));
+
+  const fresh = () => L.findTableAt(src, at);
+  const cells = (x) => x.rows.map((r) => r.cells.map((c) => (c.span > 1 ? `${c.src}*${c.span}` : c.src)));
+  let x = fresh();
+  assert.deepEqual(L.insertRow(x, 0, true), { row: 1, col: 0 });
+  assert.deepEqual(cells(x)[1], ['', '', '']);
+  assert.deepEqual(x.rows.map((r) => r.pre), ['\\toprule', '\\midrule', '', ''], 'new body row goes below the header rule');
+  x = fresh();
+  L.insertCol(x, 0, true);
+  assert.deepEqual(cells(x), [['Method', '', 'A', 'B'], ['Both*3', '3'], ['Ours % best', '', '1', '2']], 'spans widen across an inserted column');
+  assert.deepEqual(x.cols.map((c) => c.pre + c.core), ['l', 'l', '|c', 'c']);
+  x = fresh();
+  L.insertCol(x, 0, false);
+  assert.deepEqual(cells(x)[0], ['', 'Method', 'A', 'B']);
+  x = fresh();
+  L.deleteCol(x, 1);
+  assert.deepEqual(cells(x), [['Method', 'B'], ['Both', '3'], ['Ours % best', '2']]);
+  assert.equal(x.rows[1].cells[0].mcSpec, undefined, 'a span of one is a plain cell again');
+  x = fresh();
+  L.deleteRow(x, 0);
+  assert.deepEqual(x.rows.map((r) => r.pre), ['\\midrule', '']);
+  x = fresh();
+  assert.ok(L.mergeCells(x, 0, 1, 2));
+  assert.deepEqual(cells(x)[0], ['Method', 'A B*2']);
+  assert.equal(x.rows[0].cells[1].mcSpec, 'c', 'the | belongs to the column on its left, which keeps drawing it');
+  x = fresh();
+  L.splitCell(x, 1, 1);
+  assert.deepEqual(cells(x)[1], ['Both', '', '3']);
+  x = fresh();
+  assert.equal(L.hasRule(x, 2), false);
+  assert.equal(L.toggleRule(x, 2), true);
+  assert.equal(x.rows[2].pre, '\\midrule');
+  L.toggleRule(x, 3);
+  assert.equal(x.tail, '', 'bottom rule removed');
+  x = fresh();
+  L.setColAlign(x, 0, 'r');
+  assert.equal(x.cols[0].core, 'r');
+  assert.equal(L.setColWidth(x, 0, '0.3\\linewidth'), true, 'a right-aligned wrapped column needs the array package');
+  assert.equal(x.cols[0].pre + x.cols[0].core, '>{\\raggedleft\\arraybackslash}p{0.3\\linewidth}');
+  assert.deepEqual(L.colInfo(x.cols[0]), { align: 'r', width: '0.3\\linewidth' });
+  L.setColAlign(x, 0, 'c');
+  assert.equal(x.cols[0].pre + x.cols[0].core, '>{\\centering\\arraybackslash}p{0.3\\linewidth}');
+  L.setColWidth(x, 0, null);
+  assert.equal(x.cols[0].pre + x.cols[0].core, 'c');
+  x = fresh();
+  L.setBooktabs(x, false);
+  assert.deepEqual([...x.rows.map((r) => r.pre), x.tail], ['\\hline', '\\hline', '', '\\hline']);
+  L.setBooktabs(x, true);
+  assert.deepEqual([...x.rows.map((r) => r.pre), x.tail], ['\\toprule', '\\midrule', '', '\\bottomrule']);
+  assert.equal(x.cols[1].pre, '', 'booktabs drops vertical rules');
+  x = fresh();
+  const end = L.fillCells(x, { row: 2, col: 1 }, [['7', '8', '9'], ['x', 'y', 'z']]);
+  assert.deepEqual(cells(x).slice(2), [['Ours % best', '7', '8', '9'], ['', 'x', 'y', 'z']]);
+  assert.deepEqual(end, { row: 3, col: 3 });
+  assert.equal(x.cols.length, 4);
+
+  // Floats: settings and longtable.
+  const c = L.buildContext(src, { bib: '', images: {} });
+  const float = L.tableContainer(c.doc.blocks, m);
+  assert.equal(float.kind, 'table');
+  const ed = L.setFloatSetting(src, float, 'size', 'small');
+  const withSmall = src.slice(0, ed.start) + ed.text + src.slice(ed.end);
+  assert.match(withSmall, /\\centering\n  \\small\n  \\begin\{tabular\}/);
+  const f2 = L.tableContainer(L.buildContext(withSmall, { bib: '', images: {} }).doc.blocks, L.findTableAt(withSmall, withSmall.indexOf('Both')));
+  assert.deepEqual(Object.keys(L.floatSettings(withSmall, f2.innerStart, f2.innerEnd)), ['size']);
+  const rm = L.setFloatSetting(withSmall, f2, 'size', null);
+  assert.equal(withSmall.slice(0, rm.start) + rm.text + withSmall.slice(rm.end), src, 'removing the setting restores the source');
+  assert.match(L.renderDocument(L.buildContext(withSmall, { bib: '', images: {} })), /<figure class="float tab" style="font-size:0.9em"/);
+
+  const lt = L.floatToLongtable(src, float, m);
+  const ltDoc = src.slice(0, lt.start) + lt.text + src.slice(lt.end);
+  assert.match(lt.text, /^\\begin\{longtable\}\{l\|cc\}\n  \\caption\{Results\.\}\\label\{tab:r\} \\\\\n  \\toprule/);
+  const ltc = L.buildContext(ltDoc, { bib: '', images: {} });
+  assert.equal(ltc.labels.get('tab:r').num, '1', 'longtable captions are numbered');
+  assert.match(L.stripTags(L.renderDocument(ltc)), /Table 1: Results\./);
+  const back = L.longtableToFloat(ltDoc, L.findTableAt(ltDoc, ltDoc.indexOf('Both')));
+  const backDoc = ltDoc.slice(0, back.start) + back.text + ltDoc.slice(back.end);
+  assert.match(back.text, /^\\begin\{table\}\[htbp\]\n  \\centering\n  \\begin\{tabular\}\{l\|cc\}[\s\S]*\\end\{tabular\}\n  \\caption\{Results\.\}\n  \\label\{tab:r\}\n\\end\{table\}$/);
+  assert.equal(L.buildContext(backDoc, { bib: '', images: {} }).labels.get('tab:r').num, '1');
+
+  assert.equal(L.ensurePackage(src, 'amsmath'), null);
+  const pk = L.ensurePackage(src, 'booktabs');
+  assert.equal(src.slice(0, pk.start) + pk.text + src.slice(pk.end), src.replace('\\usepackage{amsmath}', '\\usepackage{amsmath}\n\\usepackage{booktabs}'));
+  assert.deepEqual(L.parseTsv('a\tb\n"multi\nline"\t"say ""hi"""\n'), [['a', 'b'], ['multi line', 'say "hi"']]);
+});
