@@ -675,7 +675,7 @@ function renderCite(cmd: string, keysSrc: string, opts: string[], ctx: Ctx): str
   const link = (key: string, text: string) => {
     const entry = ctx.bib.get(key);
     const known = entry || ctx.bibitemText.has(key);
-    const tip = entry ? bibPlain(entry) : ctx.bibitemText.has(key) ? stripTags(renderInline(ctx.text.slice(ctx.bibitemText.get(key)!.start, ctx.bibitemText.get(key)!.end), ctx)) : `Citation key not found: ${key}`;
+    const tip = entry ? bibPlain(entry) : ctx.bibitemText.has(key) ? stripTags(renderInline(ctx.rootText.slice(ctx.bibitemText.get(key)!.start, ctx.bibitemText.get(key)!.end), ctx)) : `Citation key not found: ${key}`;
     return `<a class="cite${known ? '' : ' undef'}" data-cite="${escapeHtml(key)}" title="${escapeHtml(tip)}">${text}</a>`;
   };
   const num = (key: string) => String(ctx.cites.get(key) ?? '?');
@@ -1294,7 +1294,7 @@ function renderCommand(b: Block, ctx: Ctx, footnotes: string[]): string {
     case 'tableofcontents':
       return `<div ${attrs(b, 'command', 'toc', false)}><h2 class="toc-title">Contents</h2>${ctx.headings
         .filter((h) => h.level <= 2)
-        .map((h) => `<div class="toc-entry toc-l${h.level}"><a class="ref" data-goto="${h.start}"><span class="toc-num">${h.num}</span> ${renderInline(t.slice(h.title.start, h.title.end), ctx)}</a></div>`)
+        .map((h) => `<div class="toc-entry toc-l${h.level}"><a class="ref" data-goto="${h.target}"><span class="toc-num">${h.num}</span> ${renderInline(h.src.slice(h.title.start, h.title.end), ctx)}</a></div>`)
         .join('')}</div>`;
     case 'bibliography':
     case 'printbibliography':
@@ -1309,7 +1309,16 @@ function renderCommand(b: Block, ctx: Ctx, footnotes: string[]): string {
     case 'input':
     case 'include': {
       const file = b.arg ? t.slice(b.arg.start, b.arg.end).trim() : '';
-      return `<div ${attrs(b, 'command', 'input', false)}><span class="chip">\\${name}{${escapeHtml(file)}} <a class="open-file" data-file="${escapeHtml(file)}">open</a></span></div>`;
+      const open = `<a class="open-file" data-file="${escapeHtml(file)}" title="Open ${escapeHtml(file)} in the visual editor">Open ↗</a>`;
+      const child = ctx.includes.get(b.start);
+      if (!child) {
+        const missing = ctx.host.includes?.[file] === null;
+        return `<div ${attrs(b, 'command', 'input', false)}><span class="chip${missing ? ' undef' : ''}">\\${name}{${escapeHtml(file)}}${missing ? ' · file not found' : ''} ${open}</span></div>`;
+      }
+      child.footnote = ctx.footnote;
+      const body = readonlyHtml(renderBlocks(child.doc.blocks, child));
+      ctx.footnote = child.footnote;
+      return `<div ${attrs(b, 'command', 'include', false)}><div class="include-bar"><span class="include-name">\\${name}{${escapeHtml(file)}}</span><span class="include-hint">read-only</span>${open}</div><div class="include-body" title="Content of ${escapeHtml(file)} (read-only). Double-click or use Open to edit it.">${body}</div></div>`;
     }
     case 'vspace':
     case 'vfill':
@@ -1323,6 +1332,20 @@ function renderCommand(b: Block, ctx: Ctx, footnotes: string[]): string {
       return chip(escapeHtml(short.replace(/\s+/g, ' ')), 'meta');
     }
   }
+}
+
+/**
+ * Makes HTML rendered from another file inert: its source offsets refer to
+ * that file, so they are removed (cross-reference targets stay, as they point
+ * into the main document) and its blocks and text regions are renamed so the
+ * webview never treats them as editable parts of this document.
+ */
+function readonlyHtml(html: string): string {
+  return html
+    .replace(/ data-(?:start|end|s|e|prefix|region)="[^"]*"/g, '')
+    .replace(/ contenteditable="true"/g, ' contenteditable="false"')
+    .replace(/class="blk /g, 'class="rblk ')
+    .replace(/class="ed(?=[ "])/g, 'class="ro');
 }
 
 function renderPreambleSummary(ctx: Ctx): string {

@@ -118,6 +118,22 @@
           ],
           "default": "theme",
           "description": "Initial page style: follow the VS Code color theme, or render on a white paper sheet. Toggle per editor with the \u25d0 Paper button."
+        },
+        "latexVisual.diagnostics.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Underline problems reported by language servers (such as LTeX spelling and grammar checks) in the visual editor. Hover an underline for the message and quick fixes."
+        },
+        "latexVisual.diagnostics.sources": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "LTeX",
+            "cSpell"
+          ],
+          "markdownDescription": "Diagnostic sources shown in the visual editor, matched case-insensitively by prefix (so `LTeX` also covers LTeX+). Use `*` to show every diagnostic, including compiler and linter messages."
         }
       }
     }

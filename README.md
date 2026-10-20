@@ -57,6 +57,12 @@ whole words across keys, author names and title words, so `lapp opensoundscape`
 finds *Lapp et al. (2023), "OpenSoundscape: …"*. Enter inserts the key, Tab adds
 another. `\ref{` / **→ Ref** completes labels the same way.
 
+**File paths.** Inside `\input{`, `\include{`, `\includegraphics{`, `\bibliography{`,
+`\addbibresource{` and `\lstinputlisting{`, the files in the document's folder
+are suggested, filtered to the right kind (`.tex`, images, `.bib`…). Paths are
+written the way LaTeX expects: `\input` and `\bibliography` without the
+extension, and figures relative to your `\graphicspath` when there is one.
+
 **Math, figures, tables and everything else.** Click an equation, figure or
 table (or inline math) to edit its source with a live preview. Hover any block
 and click **`</>`** at its left to edit its full LaTeX source. Click a
@@ -79,15 +85,26 @@ visual view follows your cursor in the source.
 | Figures | `\includegraphics` for PNG, JPG, SVG, GIF and PDF (first page), `width` / `scale`, `\graphicspath`, subfigures, captions |
 | References | `\label`, `\ref`, `\eqref`, `\autoref`, `\cref`; `\cite`, `\citep`, `\citet`, … from `.bib` files or `thebibliography`, with a numbered reference list |
 | Structure | `\maketitle`, abstract, numbered sections and `\appendix`, lists, theorem-like environments, proofs, `\tableofcontents`, verbatim |
+| Included files | `\input` / `\include` content renders inline (read-only) with numbering, references and citations continuing across files; **Open ↗** or double-click opens the file |
 
 Anything the editor doesn't understand is shown dimmed rather than hidden, so no
 content is lost.
+
+## Spelling and grammar
+
+If you use [LTeX](https://marketplace.visualstudio.com/items?itemName=valentjn.vscode-ltex)
+(or LTeX+) or [Code Spell Checker](https://marketplace.visualstudio.com/items?itemName=streetsidesoftware.code-spell-checker),
+their problems are underlined in the visual editor just as in the text editor. Hover an
+underline to see the message and the checker's quick fixes, such as suggested
+replacements or *Add to dictionary*. The checker must be checking the `.tex` file
+(LTeX does this for open LaTeX documents by default).
 
 ## Known limitations
 
 - Math is edited in a source popover rather than typed in place.
 - Changing a table's structure (rows, columns, rules) uses the source editor.
-- `\input` / `\include` files are shown as links rather than inline.
+- `\input` / `\include` files are read-only in the visual view; open them to edit.
+- Problems are underlined only in editable text (not inside math or included files).
 - EPS figures show a placeholder.
 
 ## Settings
@@ -95,6 +112,8 @@ content is lost.
 | Setting | Default | Description |
 | --- | --- | --- |
 | `latexVisual.pageStyle` | `theme` | Initial page style: follow the color theme, or `paper` for a white page. |
+| `latexVisual.diagnostics.enabled` | `true` | Underline problems reported by spelling / grammar checkers. |
+| `latexVisual.diagnostics.sources` | `["LTeX", "cSpell"]` | Diagnostic sources to show (prefix match, so `LTeX` covers LTeX+). `"*"` shows everything, including compiler messages. |
 
 ## Development
 

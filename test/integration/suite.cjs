@@ -129,6 +129,76 @@ exports.run = async function () {
     assert.ok(disk.includes('\\section{Overview}'));
   });
 
+  // A small two-file document for \input and diagnostics.
+  const mainUri = vscode.Uri.joinPath(ws, 'main.tex');
+  const chapUri = vscode.Uri.joinPath(ws, 'chapters', 'intro.tex');
+  await vscode.workspace.fs.writeFile(chapUri, Buffer.from('\\section{Included}\\label{sec:inc}\nText from the chapter file.\n'));
+  await vscode.workspace.fs.writeFile(mainUri, Buffer.from('\\documentclass{article}\n\\begin{document}\n\\input{chapters/intro}\n\nSee Section~\\ref{sec:inc}. A mispelled word.\n\\end{document}\n'));
+  await vscode.commands.executeCommand('latexVisual.open', mainUri);
+  const main = await until(() => provider.sessionFor(mainUri), 'main.tex session');
+  await until(async () => /Text from the chapter file/.test(await main.test({ action: 'html' })), 'included file rendered');
+
+  await check('\\input renders the included file read-only, with refs into it', async () => {
+    const html = await main.test({ action: 'html' });
+    assert.match(html, /class="include-body"/);
+    assert.match(html, /<span class="secnum" contenteditable="false">1<\/span><span class="ro"/);
+    assert.match(html, /title="sec:inc">1</, 'reference resolved to the included section');
+    assert.match(html, /data-file="chapters\/intro"/);
+  });
+
+  await check('edits to the included file update the visual editor live', async () => {
+    const chap = await vscode.workspace.openTextDocument(chapUri);
+    const e = new vscode.WorkspaceEdit();
+    e.insert(chapUri, chap.positionAt(chap.getText().length), 'Freshly added sentence.\n');
+    await vscode.workspace.applyEdit(e);
+    await until(async () => /Freshly added sentence/.test(await main.test({ action: 'html' })), 'live include refresh', 5000);
+  });
+
+  await check('path completion lists the files next to the document', async () => {
+    await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(ws, 'paper.aux'), Buffer.from(''));
+    const files = await main.test({ action: 'files' });
+    for (const f of ['main.tex', 'paper.tex', 'refs.bib', 'chapters/intro.tex', 'figures/spectrum.png', 'figures/signal.pdf']) assert.ok(files.includes(f), `${f} in ${JSON.stringify(files)}`);
+    assert.ok(!files.includes('paper.aux'), 'build output skipped');
+  });
+
+  await check('LTeX diagnostics are underlined and their quick fixes apply', async () => {
+    const mdoc = await vscode.workspace.openTextDocument(mainUri);
+    const at = mdoc.getText().indexOf('mispelled');
+    const range = new vscode.Range(mdoc.positionAt(at), mdoc.positionAt(at + 'mispelled'.length));
+    const coll = vscode.languages.createDiagnosticCollection('test-ltex');
+    const ltex = new vscode.Diagnostic(range, "Possible spelling mistake found.", vscode.DiagnosticSeverity.Information);
+    ltex.source = 'LTeX';
+    const other = new vscode.Diagnostic(range, 'Compiler noise', vscode.DiagnosticSeverity.Error);
+    other.source = 'LaTeX';
+    coll.set(mainUri, [ltex, other]);
+    const fix = vscode.languages.registerCodeActionsProvider({ pattern: '**/main.tex' }, {
+      provideCodeActions(doc, r, c) {
+        if (!c.diagnostics.some((d) => d.source === 'LTeX')) return [];
+        const a = new vscode.CodeAction("Use 'misspelled'", vscode.CodeActionKind.QuickFix);
+        a.edit = new vscode.WorkspaceEdit();
+        a.edit.replace(doc.uri, r, 'misspelled');
+        a.diagnostics = [ltex];
+        a.isPreferred = true;
+        return [a];
+      },
+    });
+    try {
+      const drawn = await until(async () => {
+        const d = await main.test({ action: 'diagnostics' });
+        return d.drawn.length && d;
+      }, 'underline drawn', 5000);
+      assert.ok(drawn.supported, 'CSS Custom Highlight API available');
+      assert.deepEqual(drawn.drawn.map((x) => [x.text, x.severity]), [['mispelled', 'info']], 'only the LTeX diagnostic is shown');
+      const res = await main.test({ action: 'diagFixes', index: 0, apply: 0 });
+      assert.deepEqual(res.fixes, [{ title: "Use 'misspelled'", preferred: true }]);
+      await until(() => mdoc.getText().includes('A misspelled word.'), 'quick fix applied');
+      await until(async () => /A misspelled word\./.test(await main.test({ action: 'html' })), 'fix rendered');
+    } finally {
+      fix.dispose();
+      coll.dispose();
+    }
+  });
+
   console.log('\nIntegration results:\n' + results.join('\n') + '\n');
   if (results.some((r) => r.includes('✗'))) throw new Error('integration checks failed');
 };

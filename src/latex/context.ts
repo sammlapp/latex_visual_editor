@@ -29,6 +29,8 @@ export interface ImageInfo {
 export interface HostResources {
   images: Record<string, ImageInfo>;
   bib: string;
+  /** Text of files pulled in by \input / \include, keyed by the argument as written (null: not found). */
+  includes?: Record<string, string | null>;
 }
 
 export interface LabelInfo {
@@ -55,6 +57,10 @@ export interface HeadingInfo {
   level: number;
   num: string;
   title: Range;
+  /** Text that `title` indexes (differs from the main document for headings in included files). */
+  src: string;
+  /** Offset in the main document to jump to. */
+  target: number;
 }
 
 export interface Ctx {
@@ -84,7 +90,14 @@ export interface Ctx {
   meta: { title?: Range; author?: Range; date?: Range; documentclass?: string };
   /** Render-time footnote counter. */
   footnote: number;
+  /** Contexts of \input / \include files, per command start offset. */
+  includes: Map<number, Ctx>;
+  /** Text of the main document (label targets and bibitem ranges refer to it). */
+  rootText: string;
 }
+
+/** Nesting limit for \input files (also stops include cycles). */
+const MAX_INCLUDE_DEPTH = 8;
 
 const DEFAULT_THEOREMS: Record<string, string> = {
   theorem: 'Theorem',
@@ -128,6 +141,8 @@ export function buildContext(text: string, host: HostResources): Ctx {
     theorems: new Map(),
     meta: {},
     footnote: 0,
+    includes: new Map(),
+    rootText: text,
   };
   for (const [env, title] of Object.entries(DEFAULT_THEOREMS)) ctx.theorems.set(env, { title, counter: env, numbered: true });
   scanDefinitions(ctx);
@@ -254,7 +269,7 @@ function scanDefinitions(ctx: Ctx) {
   }
 }
 
-/** Numbers citations in order of first appearance in the body. */
+/** Numbers citations in order of first appearance in the body (descending into included files). */
 function scanCitations(ctx: Ctx) {
   const t = ctx.text;
   const { bodyStart, bodyEnd } = ctx.doc;
@@ -267,7 +282,11 @@ function scanCitations(ctx: Ctx) {
     }
     if (c !== '\\') continue;
     const name = readCommandName(t, i);
-    if (CITE_COMMANDS.has(name)) {
+    const child = (name === 'input' || name === 'include') && ctx.includes.get(i);
+    if (child) {
+      scanCitations(child);
+      i += name.length;
+    } else if (CITE_COMMANDS.has(name)) {
       const args = readArgs(t, i + 1 + name.length, 1, bodyEnd, 2);
       const g = args.required[0];
       if (g) {
@@ -330,10 +349,15 @@ class Numberer {
   private appendix = false;
   private topLevel: number;
   private listDepth = 0;
+  /** While inside an included file: the main-document offset of the \input command (label target). */
+  private anchor: number | undefined;
+  /** Files currently being included (cycle check). */
+  private stack: string[] = [];
 
   constructor(private ctx: Ctx) {
     const cls = ctx.meta.documentclass ?? '';
-    this.topLevel = /book|report|thesis/.test(cls) || /\\chapter\b/.test(ctx.text) ? 0 : 1;
+    const sources = [ctx.text, ...Object.values(ctx.host.includes ?? {})];
+    this.topLevel = /book|report|thesis/.test(cls) || sources.some((s) => s && /\\chapter\b/.test(s)) ? 0 : 1;
   }
 
   walk(blocks: Block[]) {
@@ -341,7 +365,7 @@ class Numberer {
   }
 
   private label(key: string, num: string, kind: LabelInfo['kind'], target: number) {
-    if (!this.ctx.labels.has(key)) this.ctx.labels.set(key, { num, kind, target });
+    if (!this.ctx.labels.has(key)) this.ctx.labels.set(key, { num, kind, target: this.anchor ?? target });
   }
 
   private labelsIn(s: number, e: number, kind: LabelInfo['kind'], target: number) {
@@ -368,7 +392,7 @@ class Numberer {
         const parts = this.sec.slice(0, idx + 1).map((n, k) => (k === 0 && this.appendix ? String.fromCharCode(64 + n) : String(n)));
         const num = parts.join('.');
         this.ctx.headingNums.set(b.start, num);
-        this.ctx.headings.push({ start: b.start, level, num, title: b.arg! });
+        this.ctx.headings.push({ start: b.start, level, num, title: b.arg!, src: t, target: this.anchor ?? b.start });
         this.lastRef = num;
         this.labelsIn(b.start, b.end, 'section', b.start);
         break;
@@ -438,11 +462,53 @@ class Numberer {
         if (b.name === 'appendix') {
           this.appendix = true;
           this.sec = this.sec.map(() => 0);
+        } else if (b.name === 'input' || b.name === 'include') {
+          this.include(b);
         }
         break;
       case 'paragraph':
         this.labelsIn(b.start, b.end, 'other', b.start);
         break;
+    }
+  }
+
+  /**
+   * Parses an included file into its own context and numbers it in place, so
+   * sections, equations, labels and citations continue across files.
+   */
+  private include(b: Block) {
+    const parent = this.ctx;
+    const file = b.arg ? parent.text.slice(b.arg.start, b.arg.end).trim() : '';
+    const src = parent.host.includes?.[file];
+    if (typeof src !== 'string' || this.stack.includes(file) || this.stack.length >= MAX_INCLUDE_DEPTH) return;
+    // Offset-keyed maps are per file; labels, headings and citations are shared.
+    const child: Ctx = {
+      ...parent,
+      doc: parseDocument(src),
+      text: src,
+      headingNums: new Map(),
+      mathSrc: new Map(),
+      floatNums: new Map(),
+      subNums: new Map(),
+      theoremNums: new Map(),
+      katexMacros: { ...parent.katexMacros },
+      textMacros: new Map(parent.textMacros),
+      theorems: new Map(parent.theorems),
+      meta: { ...parent.meta },
+      includes: new Map(),
+    };
+    parent.includes.set(b.start, child);
+    scanDefinitions(child);
+    const anchor = this.anchor;
+    this.anchor ??= b.start;
+    this.stack.push(file);
+    this.ctx = child;
+    try {
+      this.walk(child.doc.blocks);
+    } finally {
+      this.ctx = parent;
+      this.stack.pop();
+      this.anchor = anchor;
     }
   }
 

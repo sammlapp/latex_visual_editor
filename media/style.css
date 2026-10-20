@@ -249,6 +249,17 @@ li.bib-item { padding-left: 2.6em; text-indent: -2.6em; margin: 0.35em 0; }
 .blk-comment .comment { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: pre-wrap; opacity: 0.7; }
 .render-error { color: var(--error); font-family: var(--sans); font-size: 12px; }
 .open-file { margin-left: 6px; color: var(--accent); cursor: pointer; }
+
+/* \input / \include: the other file's content, read-only */
+.blk-command.include { border-left: 2px dashed var(--border); margin: 0.6em -10px; padding-left: 12px; }
+.include-bar { display: flex; gap: 8px; align-items: baseline; font-family: var(--sans); font-size: 11px; color: var(--muted); }
+.include-name { font-family: var(--mono); }
+.include-hint { opacity: 0.7; }
+.include-bar .open-file { margin-left: auto; text-decoration: none; }
+.include-bar .open-file:hover { text-decoration: underline; }
+.include-body { cursor: default; }
+.include-body .rblk { position: relative; padding: 2px 0; }
+.include-body .blk-command.include { margin: 0.6em 0; }
 .add-block { margin-top: 1.5em; font-family: var(--sans); font-size: 12px; color: var(--muted); cursor: pointer; opacity: 0.6; }
 .add-block:hover { opacity: 1; color: var(--accent); }
 
@@ -323,7 +334,7 @@ body.paper .editor textarea { background: #fafafa; color: #1a1a1a; }
 
 #doc { outline: none; caret-color: var(--accent); }
 #page { position: relative; }
-.ed { white-space: pre-wrap; outline: none; }
+.ed, .ro { white-space: pre-wrap; outline: none; }
 .ed .isl, .ed .katex { white-space: normal; }
 .blk .ed:focus-within { }
 .isl { cursor: pointer; border-radius: 3px; }
@@ -403,3 +414,40 @@ body.paper .cmp.active { background: rgba(37, 99, 235, 0.12); color: inherit; }
 .cmp.active .cmp-main span, .cmp.active .cmp-info { color: inherit; opacity: 0.85; }
 .cmp.empty { color: var(--muted); cursor: default; }
 .cmp-hint { font-size: 10px; color: var(--muted); padding: 3px 8px; border-top: 1px solid var(--border); }
+
+/* Diagnostics (LTeX, cSpell…) ------------------------------------------------ */
+
+/* Literal colors: custom properties are not reliably available inside ::highlight(). */
+::highlight(diag-error) { text-decoration: underline wavy #e51400; text-decoration-skip-ink: none; }
+::highlight(diag-warning) { text-decoration: underline wavy #bf8803; text-decoration-skip-ink: none; }
+::highlight(diag-info) { text-decoration: underline wavy #1a85ff; text-decoration-skip-ink: none; }
+::highlight(diag-hint) { text-decoration: underline dotted #6c6c6c; }
+body.vscode-dark:not(.paper) ::highlight(diag-error), body.vscode-high-contrast:not(.paper) ::highlight(diag-error) { text-decoration-color: #f14c4c; }
+body.vscode-dark:not(.paper) ::highlight(diag-warning), body.vscode-high-contrast:not(.paper) ::highlight(diag-warning) { text-decoration-color: #cca700; }
+body.vscode-dark:not(.paper) ::highlight(diag-info), body.vscode-high-contrast:not(.paper) ::highlight(diag-info) { text-decoration-color: #3794ff; }
+body.vscode-dark:not(.paper) ::highlight(diag-hint) { text-decoration-color: #a0a0a0; }
+
+.diag-pop {
+  position: fixed;
+  z-index: 55;
+  max-width: min(440px, calc(100vw - 16px));
+  padding: 6px 8px;
+  background: var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background, #fff));
+  color: var(--vscode-editorHoverWidget-foreground, var(--fg));
+  border: 1px solid var(--vscode-editorHoverWidget-border, var(--border));
+  border-left: 3px solid #1a85ff;
+  border-radius: 4px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25);
+  font-family: var(--sans);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.diag-pop.sev-error { border-left-color: #e51400; }
+.diag-pop.sev-warning { border-left-color: #bf8803; }
+.diag-pop.sev-hint { border-left-color: #6c6c6c; }
+body.paper .diag-pop { background: #fff; color: #1a1a1a; }
+.diag-msg { white-space: pre-wrap; }
+.diag-src { color: var(--muted); font-size: 11px; margin-top: 2px; }
+.diag-fixes { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.diag-fix.preferred { background: var(--btn-primary-bg); color: var(--btn-primary-fg); }
+.diag-none { color: var(--muted); font-size: 11px; }

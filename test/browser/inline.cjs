@@ -276,6 +276,58 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   assert.ok(doc.includes('for details, and\n\\textbf{bo}\\texttt{monospace}'), '12 cross-format delete: ' + JSON.stringify(doc.slice(doc.indexOf('for details'), doc.indexOf('for details') + 60)));
   await consistent('after cross-format delete');
 
+  // 13. Diagnostics (LTeX etc.) are underlined, follow edits, and offer the server's quick fixes on hover.
+  await sync();
+  const diagAt = (word) => ({ start: doc.indexOf(word), end: doc.indexOf(word) + word.length, text: word });
+  await pg.evaluate((items) => window.postMessage({ type: 'diagnostics', batch: 7, items }, '*'), [
+    { ...diagAt('relativity'), severity: 'info', message: 'Possible spelling mistake found.', source: 'LTeX', code: 'MORFOLOGIK_RULE_EN_US' },
+    { ...diagAt('Results'), severity: 'warning', message: 'Heading word.', source: 'LTeX' },
+  ]);
+  await sleep(50);
+  const drawn = () => pg.evaluate(() => ['info', 'warning'].map((k) => [...(CSS.highlights.get(`diag-${k}`) ?? [])].map((r) => r.toString()).join('|')));
+  assert.deepEqual(await drawn(), ['relativity', 'Results'], '13 underlines drawn');
+  await caretAfter('Speci');
+  await pg.keyboard.type('xyz');
+  await sleep(50);
+  { const d = await drawn(); assert.deepEqual(d, ['relativity', 'Results'], '13 underlines follow typing before them: ' + JSON.stringify(d)); }
+  await sync();
+  const rect = await pg.evaluate(() => { const r = [...CSS.highlights.get('diag-info')][0].getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+  await pg.mouse.move(rect.x, rect.y);
+  await pg.waitForSelector('.diag-pop', { timeout: 2000 });
+  assert.match(await pg.$eval('.diag-pop', (p) => p.textContent), /Possible spelling mistake found\.LTeX · MORFOLOGIK_RULE_EN_US/);
+  const req = (await pg.evaluate(() => window.__sent.splice(0))).find((m) => m.type === 'codeActions');
+  assert.ok(req && req.batch === 7 && req.index === 0, '13 fixes requested for the hovered diagnostic: ' + JSON.stringify(req));
+  await pg.evaluate((id) => window.postMessage({ type: 'codeActionsResult', id, items: [{ title: "Use 'relativistic'", preferred: true }, { title: "Add 'relativity' to dictionary", preferred: false }] }, '*'), req.id);
+  await pg.waitForSelector('.diag-fix.preferred');
+  await pg.click('.diag-fix:not(.preferred)');
+  const applied = (await pg.evaluate(() => window.__sent.splice(0))).find((m) => m.type === 'applyCodeAction');
+  assert.equal(applied?.index, 1, '13 chosen fix applied by the host');
+  assert.equal(await pg.$('.diag-pop'), null, '13 popup closed');
+  // Typing inside a flagged word drops its underline until the server checks again.
+  await caretAfter('Resul');
+  await pg.keyboard.type('x');
+  await sleep(50);
+  assert.deepEqual(await drawn(), ['relativity', ''], '13 edited diagnostic removed');
+  await sync();
+  assert.ok(doc.includes('Specixyzal relativity') && doc.includes('\\subsection{Resulxts}'), '13 edits');
+  await consistent('after diagnostics');
+
+  // 14. File paths complete inside \includegraphics{…} (the host supplies the folder's files;
+  // the fixture's \graphicspath{{figures/}} makes the short path the first suggestion).
+  await sync();
+  await caretAfter('Specixyzal');
+  await pg.keyboard.type('\\');
+  await pg.waitForSelector('.popover textarea');
+  await pg.keyboard.type('includegraphics{spec');
+  await pg.waitForFunction(() => window.__sent.some((m) => m.type === 'listFiles'));
+  await pg.evaluate(() => window.postMessage({ type: 'files', files: ['paper.tex', 'figures/spectrum.png', 'figures/signal.pdf', 'refs.bib'] }, '*'));
+  await pg.waitForFunction(() => document.querySelector('.complete .cmp.active b')?.textContent === 'spectrum.png');
+  assert.deepEqual(await pg.$$eval('.complete .cmp b', (bs) => bs.map((b) => b.textContent)), ['spectrum.png', 'figures/spectrum.png'], '14 only matching graphics offered');
+  await pg.keyboard.press('Enter');
+  await sync();
+  assert.ok(doc.includes('Specixyzal\\includegraphics{spectrum.png} relativity'), '14 path inserted: ' + JSON.stringify(doc.slice(doc.indexOf('Specixyzal'), doc.indexOf('Specixyzal') + 60)));
+  await consistent('after file completion');
+
   console.log(errs.length ? 'PAGE ERRORS:\n' + errs.join('\n') : 'no page errors');
   console.log('ALL INLINE CHECKS PASSED');
   await b.close();

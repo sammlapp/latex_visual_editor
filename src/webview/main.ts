@@ -10,7 +10,7 @@
 import { Ctx, HostResources, buildContext } from '../latex/context';
 import { renderBlock, renderDocument, renderInline, renderRange, scanRun, stripTags } from '../latex/render';
 import { Block } from '../latex/parser';
-import { CompletionContext, CompletionItem, citationItems, completionAt, filterCompletions, labelItems } from '../latex/complete';
+import { CompletionContext, CompletionItem, citationItems, completionAt, fileItems, filterCompletions, labelItems } from '../latex/complete';
 
 interface VsCodeApi {
   postMessage(msg: unknown): void;
@@ -98,6 +98,7 @@ function localEdit(a: number, b: number, ins: string) {
   if (!win) win = { start: a, hostLen: b - a, len: b - a };
   win.len += ins.length - (b - a);
   text = text.slice(0, a) + ins + text.slice(b);
+  shiftDiagnostics(a, b, ins.length);
   clearTimeout(win.timer);
   win.timer = window.setTimeout(flushWin, 250);
 }
@@ -126,6 +127,20 @@ window.addEventListener('message', (ev) => {
       break;
     case 'insertTemplate':
       insertBlock(msg.text, msg.at);
+      break;
+    case 'resources':
+      onResources(msg.host);
+      break;
+    case 'diagnostics':
+      onDiagnostics(msg.batch, msg.items);
+      break;
+    case 'files':
+      fileList = { files: msg.files, at: Date.now() };
+      fileWaiters.splice(0).forEach((f) => f());
+      break;
+    case 'codeActionsResult':
+      fixWaiters.get(msg.id)?.(msg.items);
+      fixWaiters.delete(msg.id);
       break;
     case '__test':
       if (__TEST_HOOKS__) void runTest(msg);
@@ -157,6 +172,7 @@ function onUpdate(newText: string, newHost: HostResources, external: boolean, ch
       else overlap = true;
     }
     text = newText;
+    for (const c of changes) shiftDiagnostics(c.offset, c.offset + c.removed, c.inserted);
     if (overlap) {
       closeEditor(false);
       return;
@@ -182,6 +198,7 @@ function onUpdate(newText: string, newHost: HostResources, external: boolean, ch
       caret = shifted;
     }
     text = newText;
+    for (const c of changes) shiftDiagnostics(c.offset, c.offset + c.removed, c.inserted);
     renderAll(caret);
     return;
   }
@@ -193,6 +210,14 @@ function onUpdate(newText: string, newHost: HostResources, external: boolean, ch
   } else if (hostChanged) {
     renderAll(caretSource());
   }
+}
+
+/** Included files or other host resources changed; the text did not. */
+function onResources(newHost: HostResources) {
+  if (JSON.stringify(newHost) === JSON.stringify(host)) return;
+  host = newHost;
+  if (sourceEd) updatePreview();
+  else if (!firstRender) renderAll(caretSource());
 }
 
 // ---------------------------------------------------------------------------
@@ -209,8 +234,10 @@ function renderAll(caret: number | null = null) {
   ctx = buildContext(text, host);
   const scroller = document.scrollingElement ?? document.documentElement;
   const y = firstRender && state.scrollY ? state.scrollY : scroller.scrollTop;
+  hideDiagPopup();
   root.innerHTML = renderDocument(ctx) + `<div class="add-block" contenteditable="false" title="Add a paragraph at the end">+ Add paragraph</div>`;
   postRender(root);
+  drawDiagnostics();
   scroller.scrollTop = y;
   firstRender = false;
   if (selected) markSelected(selected.start);
@@ -596,6 +623,7 @@ function applyEdit(a: number, b: number, ins: string, caret: number, regionEl: H
         shiftOffsets(blkEl, a, b, delta);
         blkEl.replaceWith(fresh);
         postRender(fresh);
+        drawDiagnostics();
         setCaret(caret);
         updateToolbarState();
         return;
@@ -1001,6 +1029,11 @@ root.addEventListener('click', (e) => {
     handleLink(link as HTMLAnchorElement);
     return;
   }
+  if (target.closest('.include-body')) {
+    // Read-only content of an included file (double-click opens it).
+    if (sourceEd) closeEditor();
+    return;
+  }
   if (target.closest('.add-block')) {
     if (sourceEd) closeEditor();
     const c = ctx ?? buildContext(text, host);
@@ -1046,6 +1079,12 @@ root.addEventListener('click', (e) => {
     return;
   }
   fixCaretAfterClick(e.clientX, e.clientY);
+});
+
+root.addEventListener('dblclick', (e) => {
+  const body = (e.target as HTMLElement).closest('.include-body');
+  const open = body?.parentElement?.querySelector<HTMLElement>(':scope > .include-bar > .open-file');
+  if (open) vscode.postMessage({ type: 'openFile', file: open.dataset.file });
 });
 
 /**
@@ -1115,6 +1154,7 @@ gutter.addEventListener('click', () => {
 function openEditor(el: HTMLElement) {
   flushWin();
   closePopover();
+  hideDiagPopup();
   const start = Number(el.dataset.start);
   const end = Number(el.dataset.end);
   selected = { start, end };
@@ -1256,6 +1296,7 @@ function flushSend() {
   const old = text.slice(sourceEd.start, sourceEd.start + sourceEd.hostLen);
   if (value === old) return;
   sendEdit(sourceEd.start, sourceEd.start + sourceEd.hostLen, value);
+  shiftDiagnostics(sourceEd.start, sourceEd.start + sourceEd.hostLen, value.length);
   text = text.slice(0, sourceEd.start) + value + text.slice(sourceEd.start + sourceEd.hostLen);
   sourceEd.hostLen = value.length;
 }
@@ -1302,6 +1343,7 @@ function insertBlock(src: string, at?: number, inline = false) {
   const trail = after.startsWith('\n\n') ? '' : after.startsWith('\n') ? '\n' : '\n\n';
   const insert = lead + src + trail;
   sendEdit(pos, pos, insert);
+  shiftDiagnostics(pos, pos, insert.length);
   text = before + insert + after;
   const start = pos + lead.length;
   if (inline) {
@@ -1458,9 +1500,26 @@ function caretCoords(ta: HTMLTextAreaElement): { left: number; top: number } {
   return pos;
 }
 
+/** Files next to the document (paths relative to its folder), fetched from the host and kept briefly. */
+let fileList: { files: string[]; at: number } | null = null;
+const fileWaiters: (() => void)[] = [];
+
+/** The file list, or null while it loads (`onReady` runs when a fresh list arrives). */
+function documentFiles(onReady: () => void): string[] | null {
+  if (fileList && Date.now() - fileList.at < 10000) return fileList.files;
+  if (!fileWaiters.length) vscode.postMessage({ type: 'listFiles' });
+  fileWaiters.push(onReady);
+  return fileList?.files ?? null;
+}
+
+function graphicsPaths(src: string): string[] {
+  const gp = /\\graphicspath\s*\{((?:\s*\{[^}]*\})*)\s*\}/.exec(src);
+  return gp ? [...gp[1].matchAll(/\{([^}]*)\}/g)].map((m) => m[1]) : [];
+}
+
 /**
- * Shows bibliography entries while a citation key is being typed (and labels
- * for \ref-like commands). ↑/↓ choose, Enter inserts the key and closes the
+ * Shows bibliography entries while a citation key is being typed (labels
+ * for \ref-like commands, files for \input, \includegraphics and the like). ↑/↓ choose, Enter inserts the key and closes the
  * brace, Tab inserts it followed by ", " for another key, Esc dismisses.
  */
 function attachCompletion(ta: HTMLTextAreaElement, onAccept?: (mode: 'enter' | 'tab') => void): () => void {
@@ -1472,6 +1531,7 @@ function attachCompletion(ta: HTMLTextAreaElement, onAccept?: (mode: 'enter' | '
   let active = 0;
   let cc: CompletionContext | null = null;
   let dismissedAt = -1;
+  let loading = false;
 
   const hide = () => {
     list.style.display = 'none';
@@ -1480,6 +1540,10 @@ function attachCompletion(ta: HTMLTextAreaElement, onAccept?: (mode: 'enter' | '
   const draw = () => {
     if (!cc) return;
     const hint = cc.kind === 'cite' ? '↵ insert · Tab add another · Esc close' : '↵ insert · Esc close';
+    const empty =
+      cc.kind === 'cite'
+        ? ctx?.bib.size || ctx?.bibitemText.size ? 'No matching bibliography entries' : 'No bibliography found (\\bibliography{…} or \\addbibresource{…})'
+        : cc.kind === 'file' ? (loading ? 'Looking for files…' : 'No matching files in this folder') : 'No matching labels';
     list.innerHTML = items.length
       ? items
           .map(
@@ -1489,7 +1553,7 @@ function attachCompletion(ta: HTMLTextAreaElement, onAccept?: (mode: 'enter' | '
               }</div>`,
           )
           .join('') + `<div class="cmp-hint">${hint}</div>`
-      : `<div class="cmp empty">${cc.kind === 'cite' ? (ctx?.bib.size || ctx?.bibitemText.size ? 'No matching bibliography entries' : 'No bibliography found (\\bibliography{…} or \\addbibresource{…})') : 'No matching labels'}</div>`;
+      : `<div class="cmp empty">${empty}</div>`;
     list.querySelector('.cmp.active')?.scrollIntoView({ block: 'nearest' });
   };
   const update = () => {
@@ -1500,7 +1564,13 @@ function attachCompletion(ta: HTMLTextAreaElement, onAccept?: (mode: 'enter' | '
       return hide();
     }
     const c = ctx ?? buildContext(text, host);
-    items = filterCompletions(cc.kind === 'cite' ? citationItems(c) : labelItems(c), cc.query, 8);
+    let source: CompletionItem[];
+    if (cc.kind === 'file') {
+      const files = documentFiles(() => list.isConnected && document.activeElement === ta && update());
+      loading = !files;
+      source = fileItems(files ?? [], cc.command, graphicsPaths(c.text));
+    } else source = cc.kind === 'cite' ? citationItems(c) : labelItems(c);
+    items = filterCompletions(source, cc.query, cc.kind === 'file' ? 10 : 8);
     active = 0;
     draw();
     const pos = caretCoords(ta);
@@ -1576,6 +1646,189 @@ function attachCompletion(ta: HTMLTextAreaElement, onAccept?: (mode: 'enter' | '
 }
 
 // ---------------------------------------------------------------------------
+// Diagnostics from language servers (LTeX, cSpell…), drawn as underlines with
+// the CSS Custom Highlight API so the editable DOM is never touched. Hovering
+// one shows its message and the server's quick fixes.
+
+type Severity = 'error' | 'warning' | 'info' | 'hint';
+interface Diag {
+  start: number;
+  end: number;
+  /** Source text the diagnostic covered when it was published (used to re-anchor it). */
+  text: string;
+  severity: Severity;
+  message: string;
+  source?: string;
+  code?: string;
+  /** Position in the host's list, for requesting quick fixes. */
+  index: number;
+}
+interface Fix {
+  title: string;
+  preferred: boolean;
+}
+
+const SEVERITIES: Severity[] = ['error', 'warning', 'info', 'hint'];
+const highlightsSupported = typeof CSS !== 'undefined' && 'highlights' in CSS;
+let diags: Diag[] = [];
+let diagBatch = 0;
+/** DOM ranges of the drawn diagnostics, for hover hit-testing. */
+let diagRanges: { d: Diag; range: Range }[] = [];
+
+function onDiagnostics(batch: number, items: Omit<Diag, 'index'>[]) {
+  diagBatch = batch;
+  hideDiagPopup();
+  diags = [];
+  items.forEach((item, index) => {
+    let { start, end } = item;
+    // Offsets refer to the host's text: map them past keystrokes not yet sent.
+    if (win) {
+      const winEnd = win.start + win.hostLen;
+      if (start >= winEnd) {
+        start += win.len - win.hostLen;
+        end += win.len - win.hostLen;
+      } else if (end >= win.start) return;
+    }
+    // The server may have checked a slightly older text; look for the flagged words nearby.
+    if (text.slice(start, end) !== item.text) {
+      const k = text.indexOf(item.text, Math.max(0, start - 200));
+      if (!item.text || k === -1 || Math.abs(k - start) > 200) return;
+      end = k + item.text.length;
+      start = k;
+    }
+    diags.push({ ...item, start, end, index });
+  });
+  drawDiagnostics();
+}
+
+/** Keeps diagnostics aligned with local edits (source [a, b) replaced by `inserted` characters); touched ones are dropped. */
+function shiftDiagnostics(a: number, b: number, inserted: number) {
+  if (!diags.length) return;
+  const delta = inserted - (b - a);
+  diags = diags.flatMap((d) => (d.end < a ? [d] : d.start > b ? [{ ...d, start: d.start + delta, end: d.end + delta }] : []));
+}
+
+function drawDiagnostics() {
+  diagRanges = [];
+  if (!highlightsSupported) return;
+  const groups: Record<Severity, Range[]> = { error: [], warning: [], info: [], hint: [] };
+  if (diags.length && ctx) {
+    // Text runs never overlap, so sorted by start they are sorted by end too.
+    const runs = [...root.querySelectorAll<HTMLElement>('.r[data-s]')]
+      .map((el) => ({ el, s: Number(el.dataset.s), e: Number(el.dataset.e) }))
+      .filter((r) => r.e > r.s && !r.el.closest('.editor'))
+      .sort((x, y) => x.s - y.s);
+    for (const d of diags) {
+      let lo = 0;
+      let hi = runs.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (runs[mid].e <= d.start) lo = mid + 1;
+        else hi = mid;
+      }
+      for (let k = lo; k < runs.length && runs[k].s < d.end; k++) {
+        const { el, s, e } = runs[k];
+        const node = el.firstChild;
+        if (!node || node.nodeType !== 3) continue;
+        const len = node.textContent!.length;
+        const from = Math.min(sourceToRunIndex(el, Math.max(d.start, s)), len);
+        const to = Math.min(sourceToRunIndex(el, Math.min(d.end, e)), len);
+        if (to <= from) continue;
+        const range = document.createRange();
+        range.setStart(node, from);
+        range.setEnd(node, to);
+        groups[d.severity].push(range);
+        diagRanges.push({ d, range });
+      }
+    }
+  }
+  for (const sev of SEVERITIES) CSS.highlights.set(`diag-${sev}`, new Highlight(...groups[sev]));
+}
+
+let fixSeq = 0;
+const fixWaiters = new Map<number, (items: Fix[]) => void>();
+
+function requestFixes(d: Diag): Promise<Fix[]> {
+  flushWin();
+  const id = ++fixSeq;
+  return new Promise((resolve) => {
+    fixWaiters.set(id, resolve);
+    vscode.postMessage({ type: 'codeActions', id, batch: diagBatch, index: d.index });
+  });
+}
+
+function diagAt(x: number, y: number): Diag | undefined {
+  for (const { d, range } of diagRanges) {
+    for (const r of range.getClientRects()) if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom + 3) return d;
+  }
+  return undefined;
+}
+
+let diagPop: HTMLElement | null = null;
+let popFor: Diag | null = null;
+let hoverTimer: number | undefined;
+let hoverFrame = 0;
+
+root.addEventListener('mousemove', (e) => {
+  if (!diagRanges.length || sourceEd || hoverFrame) return;
+  const { clientX, clientY } = e;
+  hoverFrame = requestAnimationFrame(() => {
+    hoverFrame = 0;
+    const d = diagAt(clientX, clientY);
+    if (d && d === popFor) return clearTimeout(hoverTimer);
+    clearTimeout(hoverTimer);
+    if (d) hoverTimer = window.setTimeout(() => showDiagPopup(d), popFor ? 80 : 350);
+    else if (popFor) hoverTimer = window.setTimeout(hideDiagPopup, 300);
+  });
+});
+root.addEventListener('mouseleave', () => {
+  clearTimeout(hoverTimer);
+  if (popFor) hoverTimer = window.setTimeout(hideDiagPopup, 300);
+});
+document.addEventListener('keydown', () => hideDiagPopup(), true);
+window.addEventListener('scroll', () => hideDiagPopup(), true);
+
+function showDiagPopup(d: Diag) {
+  hideDiagPopup();
+  const entry = diagRanges.find((r) => r.d === d);
+  if (!entry) return;
+  popFor = d;
+  const pop = document.createElement('div');
+  pop.className = `diag-pop sev-${d.severity}`;
+  const origin = [d.source, d.code].filter(Boolean).join(' · ');
+  pop.innerHTML = `<div class="diag-msg">${esc(d.message)}</div>${origin ? `<div class="diag-src">${esc(origin)}</div>` : ''}<div class="diag-fixes"><span class="diag-none">Looking for fixes…</span></div>`;
+  pop.addEventListener('mouseenter', () => clearTimeout(hoverTimer));
+  pop.addEventListener('mouseleave', () => (hoverTimer = window.setTimeout(hideDiagPopup, 300)));
+  // Keep the caret in the text while clicking a fix.
+  pop.addEventListener('mousedown', (e) => e.preventDefault());
+  document.body.appendChild(pop);
+  diagPop = pop;
+  const rect = entry.range.getBoundingClientRect();
+  pop.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - pop.offsetWidth - 8))}px`;
+  pop.style.top = `${rect.bottom + 4 + pop.offsetHeight > window.innerHeight ? Math.max(4, rect.top - pop.offsetHeight - 4) : rect.bottom + 4}px`;
+  void requestFixes(d).then((fixes) => {
+    if (popFor !== d) return;
+    const box = pop.querySelector<HTMLElement>('.diag-fixes')!;
+    box.innerHTML = fixes.length
+      ? fixes.map((f, k) => `<button class="diag-fix${f.preferred ? ' preferred' : ''}" data-k="${k}">${esc(f.title)}</button>`).join('')
+      : '<span class="diag-none">No quick fixes</span>';
+    box.querySelectorAll<HTMLButtonElement>('.diag-fix').forEach((btn) =>
+      btn.addEventListener('click', () => {
+        hideDiagPopup();
+        vscode.postMessage({ type: 'applyCodeAction', index: Number(btn.dataset.k) });
+      }),
+    );
+  });
+}
+
+function hideDiagPopup() {
+  clearTimeout(hoverTimer);
+  diagPop?.remove();
+  diagPop = null;
+  popFor = null;
+}
+
+// ---------------------------------------------------------------------------
 // State & test hooks
 
 function saveState(patch: Record<string, unknown>) {
@@ -1626,6 +1879,20 @@ async function runTest(msg: any) {
       }
       flushWin();
       return reply({ ok: true, caret: caretSource() });
+    }
+    if (msg.action === 'diagnostics') {
+      return reply({ supported: highlightsSupported, drawn: diagRanges.map((r) => ({ text: r.range.toString(), severity: r.d.severity, message: r.d.message })) });
+    }
+    if (msg.action === 'diagFixes') {
+      const d = diagRanges[msg.index ?? 0]?.d;
+      if (!d) return reply({ error: 'no such diagnostic' });
+      const fixes = await requestFixes(d);
+      if (msg.apply !== undefined) vscode.postMessage({ type: 'applyCodeAction', index: msg.apply });
+      return reply({ fixes });
+    }
+    if (msg.action === 'files') {
+      fileList = null;
+      return reply(await new Promise<string[]>((resolve) => documentFiles(() => resolve(fileList!.files))));
     }
     if (msg.action === 'insert') {
       insertBlock(TEMPLATES[msg.template]);

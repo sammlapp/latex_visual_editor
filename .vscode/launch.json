@@ -5,8 +5,13 @@
       "name": "Run Extension (sample paper)",
       "type": "extensionHost",
       "request": "launch",
-      "args": ["--extensionDevelopmentPath=${workspaceFolder}", "${workspaceFolder}/sample"],
-      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "${workspaceFolder}/sample"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/dist/**/*.js"
+      ],
       "preLaunchTask": "npm: build"
     }
   ]

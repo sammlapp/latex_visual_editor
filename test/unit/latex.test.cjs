@@ -198,3 +198,80 @@ test('completion context detects the key being typed', () => {
   const labels = L.filterCompletions(L.labelItems(ctx), 'fig pair').map((i) => i.key);
   assert.deepEqual(labels.slice(0, 2).sort(), ['fig:pair', 'fig:pair-a']);
 });
+
+test('\\input and \\include render the other file read-only, continuing numbering', () => {
+  const main = [
+    '\\documentclass{article}',
+    '\\newcommand{\\R}{\\mathbb{R}}',
+    '\\begin{document}',
+    '\\section{One}',
+    'See Section~\\ref{sec:two}, Eq.~\\eqref{eq:two} and \\cite{knuth1984}.',
+    '',
+    '\\input{chapters/two}',
+    '',
+    '\\section{Three}',
+    'Back in the main file \\cite{einstein1905}.',
+    '\\begin{equation} y = 1 \\end{equation}',
+    '\\include{missing}',
+    '\\end{document}',
+  ].join('\n');
+  const two = [
+    '\\section{Two}\\label{sec:two}',
+    'Included text with $x \\in \\R$ and \\cite{vaswani2017, knuth1984}.\\footnote{From the chapter.}',
+    '\\begin{equation} x = 2 \\label{eq:two} \\end{equation}',
+    '\\input{chapters/two}',
+  ].join('\n');
+  const h = { bib, images: {}, includes: { 'chapters/two': two, missing: null } };
+  const c = L.buildContext(main, h);
+  const out = L.renderDocument(c);
+  const inputAt = main.indexOf('\\input');
+
+  // Numbering and labels continue through the included file.
+  assert.deepEqual(c.headings.map((x) => x.num), ['1', '2', '3']);
+  assert.deepEqual(c.labels.get('sec:two'), { num: '2', kind: 'section', target: inputAt });
+  assert.equal(c.labels.get('eq:two').num, '1');
+  assert.match(c.mathSrc.get(main.indexOf('\\begin{equation}')), /\\tag\{2\}/, 'the main file\'s equation after the include is (2)');
+  // Citations are numbered in reading order across files.
+  assert.deepEqual(c.citeOrder, ['knuth1984', 'vaswani2017', 'einstein1905']);
+
+  const inc = /<div class="include-body"[^>]*>([\s\S]*?)<\/div><\/div><div class="blk blk-heading"/.exec(out);
+  assert.ok(inc, 'include body rendered');
+  const body = inc[1];
+  assert.match(L.stripTags(body), /Included text with/);
+  assert.match(body, /class="katex"/, 'preamble macros apply in the included file');
+  assert.match(L.stripTags(body), /\[2, 1\]/);
+  assert.match(L.stripTags(body), /From the chapter/);
+  // Nothing inside is editable or carries offsets into the main document...
+  assert.doesNotMatch(body, /data-(start|end|s|e)="|contenteditable="true"|class="(blk|ed)[ "]/);
+  // ...and the self-include stops instead of recursing.
+  assert.equal((body.match(/class="include-body"/g) ?? []).length, 0);
+  assert.match(out, /class="blk blk-command include"[^>]*data-start="\d+"/);
+  assert.match(out, /data-file="chapters\/two"/);
+  assert.match(out, /\\include\{missing\} · file not found/);
+
+  // Without the host's file contents it is a link, as before.
+  assert.match(L.renderDocument(L.buildContext(main, { bib, images: {} })), /class="blk blk-command input"/);
+});
+
+test('file completion for \\input, \\includegraphics and \\bibliography', () => {
+  const at = (s) => L.completionAt(s.replace('|', ''), s.indexOf('|') === -1 ? s.length : s.indexOf('|'));
+  let c = at('\\includegraphics[width=0.5\\linewidth]{figures/sp');
+  assert.deepEqual([c.kind, c.command, c.query], ['file', 'includegraphics', 'figures/sp']);
+  c = at('\\input{chap|ters/one} more');
+  assert.deepEqual([c.kind, c.query, c.to], ['file', 'chap', '\\input{chapters/one'.length], 'replaces the whole path');
+  c = at('\\bibliography{refs,ot');
+  assert.deepEqual([c.query, c.from], ['ot', '\\bibliography{refs,'.length], 'bibliography lists split at commas');
+  assert.equal(at('\\includegraphics{my figure').query, 'my figure', 'paths may contain spaces');
+  assert.equal(at('\\inputminted{python}{sc').query, 'sc');
+  assert.equal(at('\\includegraphics{done.png} and'), null);
+
+  const files = ['paper.tex', 'chapters/one.tex', 'chapters/two.tex', 'figures/spectrum.png', 'figures/signal.pdf', 'refs.bib', 'notes.txt'];
+  const keys = (cmd, q, gp) => L.filterCompletions(L.fileItems(files, cmd, gp), q, 10).map((i) => i.key);
+  assert.deepEqual(keys('input', ''), ['paper', 'chapters/one', 'chapters/two'], '.tex files without extension, shallow first');
+  assert.deepEqual(keys('input', 'two'), ['chapters/two']);
+  assert.deepEqual(keys('includegraphics', 'spec'), ['figures/spectrum.png']);
+  assert.deepEqual(keys('includegraphics', 'sig', ['figures/']), ['signal.pdf', 'figures/signal.pdf'], 'relative to \\graphicspath first');
+  assert.deepEqual(keys('bibliography', ''), ['refs']);
+  assert.deepEqual(keys('addbibresource', ''), ['refs.bib']);
+  assert.ok(keys('lstinputlisting', 'notes').includes('notes.txt'));
+});

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- `\input` / `\include` files render inline, read-only, with an **Open ↗** button (or double-click) to
+  edit them. Section, equation, figure and citation numbering continues across files, `\ref`s into
+  included files resolve, and the view updates live as the included file changes.
+- File path completion in `\input`, `\include`, `\includegraphics`, `\bibliography`,
+  `\addbibresource`, `\lstinputlisting` and similar, from the files in the document's folder (respecting
+  `\graphicspath`, and dropping `.tex` / `.bib` where LaTeX expects that).
+- Problems reported by language servers — LTeX spelling and grammar checks, Code Spell Checker — are
+  underlined in the visual editor. Hover an underline for the message and the server's quick fixes
+  (replacements, add to dictionary, …). Configure with `latexVisual.diagnostics.*`.
+
 ## 0.1.0 — preview
 
 First public preview.

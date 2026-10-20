@@ -1,4 +1,5 @@
-// Completion data for citations (\cite{...}) and cross-references (\ref{...}).
+// Completion data for citations (\cite{...}), cross-references (\ref{...})
+// and file paths (\input{...}, \includegraphics{...}, \bibliography{...}).
 // Matching is word-based: every query word must match the start of a word in
 // the entry (key parts, author names, title words, year), so
 // "lapp opensoundscape" finds Lapp et al., "OpenSoundscape: ...".
@@ -132,7 +133,59 @@ export function filterCompletions(items: CompletionItem[], query: string, limit 
   return scored.slice(0, limit).map((s) => s.item);
 }
 
-export type CompletionKind = 'cite' | 'ref';
+/** What a file-taking command accepts, and whether the extension is written. */
+const FILE_COMMANDS: Record<string, { exts: string[] | null; dropExt: boolean }> = {
+  input: { exts: ['.tex'], dropExt: true },
+  include: { exts: ['.tex'], dropExt: true },
+  subfile: { exts: ['.tex'], dropExt: true },
+  includegraphics: { exts: ['.pdf', '.png', '.jpg', '.jpeg', '.eps', '.svg', '.gif'], dropExt: false },
+  includesvg: { exts: ['.svg'], dropExt: false },
+  includepdf: { exts: ['.pdf'], dropExt: false },
+  bibliography: { exts: ['.bib'], dropExt: true },
+  addbibresource: { exts: ['.bib'], dropExt: false },
+  lstinputlisting: { exts: null, dropExt: false },
+  verbatiminput: { exts: null, dropExt: false },
+  inputminted: { exts: null, dropExt: false },
+};
+
+const extOf = (f: string) => /(\.[^./]+)$/.exec(f)?.[1].toLowerCase() ?? '';
+
+/**
+ * Completion items for the files a command can take. `files` are paths
+ * relative to the document's folder; graphics inside a \graphicspath folder
+ * are also offered relative to that folder.
+ */
+export function fileItems(files: string[], command: string, graphicsPaths: string[] = []): CompletionItem[] {
+  const spec = FILE_COMMANDS[command] ?? { exts: null, dropExt: false };
+  const items: CompletionItem[] = [];
+  const seen = new Set<string>();
+  const sorted = files
+    .filter((f) => !spec.exts || spec.exts.includes(extOf(f)))
+    .sort((a, b) => a.split('/').length - b.split('/').length || a.localeCompare(b));
+  for (const f of sorted) {
+    const ext = extOf(f);
+    const prefixes = command === 'includegraphics' ? graphicsPaths.filter((p) => p && f.startsWith(p)) : [];
+    for (const p of [...prefixes, '']) {
+      let key = f.slice(p.length);
+      if (spec.dropExt && ext) key = key.slice(0, -ext.length);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const name = key.split('/').pop()!;
+      items.push({
+        key,
+        detail: p ? `in ${p}` : '',
+        info: '',
+        kind: 'file',
+        words: wordsOf(key),
+        strong: [normalizeWord(name), ...wordsOf(name)],
+        rank: items.length,
+      });
+    }
+  }
+  return items;
+}
+
+export type CompletionKind = 'cite' | 'ref' | 'file';
 
 export interface CompletionContext {
   kind: CompletionKind;
@@ -147,24 +200,27 @@ export interface CompletionContext {
 
 const CITE_RE = /\\([A-Za-z]*cite[A-Za-z]*|nocite)\*?(?:\s*\[[^\]]*\]){0,2}\s*\{([^{}]*)$/;
 const REF_RE = /\\(ref|eqref|autoref|Autoref|cref|Cref|pageref|nameref|vref|cpageref|labelcref)\s*\{([^{}]*)$/;
+const FILE_RE = new RegExp(String.raw`\\(${Object.keys(FILE_COMMANDS).join('|')})\*?(?:\s*\[[^\]]*\])*\s*(?:\{[^{}]*\}\s*)?\{([^{}]*)$`);
 
 /**
- * Finds a citation/reference key being typed at `caret` in `s`. The replaced
- * range also covers key characters right after the caret, so accepting a
- * suggestion in the middle of an existing key replaces the whole key.
+ * Finds a citation/reference key or file path being typed at `caret` in `s`.
+ * The replaced range also covers key characters right after the caret, so
+ * accepting a suggestion in the middle of an existing key replaces the whole key.
  */
 export function completionAt(s: string, caret: number): CompletionContext | null {
   const before = s.slice(0, caret);
-  const cite = CITE_RE.exec(before);
-  const m = cite ?? REF_RE.exec(before);
+  let kind: CompletionKind = 'cite';
+  let m = CITE_RE.exec(before);
+  if (!m && (m = REF_RE.exec(before))) kind = 'ref';
+  if (!m && (m = FILE_RE.exec(before))) kind = 'file';
   if (!m) return null;
-  const kind: CompletionKind = cite ? 'cite' : 'ref';
+  // Only bibliography lists hold several files; a path may contain spaces.
+  const list = kind !== 'file' || m[1] === 'bibliography';
   const inside = m[2];
-  const lastComma = inside.lastIndexOf(',');
-  const segment = inside.slice(lastComma + 1);
+  const segment = list ? inside.slice(inside.lastIndexOf(',') + 1) : inside;
   const lead = segment.length - segment.trimStart().length;
   const from = caret - segment.length + lead;
   let to = caret;
-  while (to < s.length && !/[,}\s]/.test(s[to])) to++;
+  while (to < s.length && !(list ? /[,}\s]/ : /[}\n]/).test(s[to])) to++;
   return { kind, command: m[1], query: s.slice(from, caret), from, to };
 }
