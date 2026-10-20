@@ -8,9 +8,11 @@
 // source popover instead.
 
 import { Ctx, HostResources, buildContext } from '../latex/context';
-import { renderBlock, renderDocument, renderInline, renderRange, scanRun, stripTags } from '../latex/render';
+import { renderBlock, renderDocument, renderInline, renderKatex, renderRange, scanRun, stripTags } from '../latex/render';
 import { Block } from '../latex/parser';
-import { CompletionContext, CompletionItem, citationItems, completionAt, fileItems, filterCompletions, labelItems } from '../latex/complete';
+import {
+  CompletionContext, CompletionItem, citationItems, commandItems, completionAt, environmentItems, fileItems, filterCompletions, inMath, labelItems,
+} from '../latex/complete';
 import {
   Align, CellPos, SettingKey, TableModel, TextEdit, cellAt, cellPosAt, colInfo, deleteCol, deleteRow, ensurePackage, fillCells, findTableAt,
   floatSettings, floatToLongtable, hasRule, insertCol, insertRow, isDataRow, longtableToFloat, mergeCells, parseTable, parseTsv,
@@ -961,7 +963,7 @@ function openInsertPopover(r: AbstractRange, initial: string, caretIdx: number) 
   if (m.a !== m.b && !isBalanced(text.slice(m.a, m.b))) return;
   closePopover();
   const reg = m.regA;
-  const rect = toLiveRange(r).getBoundingClientRect();
+  const rect = caretRect(r, reg);
   const box = document.createElement('div');
   box.className = 'popover';
   box.contentEditable = 'false';
@@ -969,9 +971,13 @@ function openInsertPopover(r: AbstractRange, initial: string, caretIdx: number) 
   const ta = box.querySelector('textarea')!;
   const preview = box.querySelector<HTMLElement>('.popover-preview')!;
   ta.value = initial;
-  const detach = attachCompletion(ta, (mode) => {
-    if (mode === 'enter') finish(true);
-  });
+  const detach = attachCompletion(
+    ta,
+    (mode) => {
+      if (mode === 'enter') finish(true);
+    },
+    { textMode: true },
+  );
   const draw = () => {
     preview.innerHTML = ta.value.trim() ? renderInline(ta.value, ctx!) : '';
     ta.style.height = 'auto';
@@ -1006,6 +1012,29 @@ function openInsertPopover(r: AbstractRange, initial: string, caretIdx: number) 
   draw();
   ta.focus();
   ta.setSelectionRange(caretIdx, caretIdx);
+}
+
+/**
+ * Screen box of a caret position. A caret in an empty region (just a <br>) or
+ * at some element boundaries has an all-zero box, so measure a temporary
+ * marker there instead (and fall back to the region itself).
+ */
+function caretRect(r: AbstractRange, region: HTMLElement): DOMRect {
+  const live = toLiveRange(r);
+  const rect = live.getClientRects()[0] ?? live.getBoundingClientRect();
+  if (rect.height || rect.top || rect.left) return rect;
+  const parent = live.startContainer.nodeType === 3 ? live.startContainer.parentNode : live.startContainer;
+  const mark = document.createElement('span');
+  mark.textContent = '\u200b';
+  try {
+    live.cloneRange().insertNode(mark);
+    const m = mark.getBoundingClientRect();
+    if (m.height) return m;
+  } finally {
+    mark.remove();
+    parent?.normalize();
+  }
+  return region.getBoundingClientRect();
 }
 
 function closePopover() {
@@ -1675,7 +1704,7 @@ function graphicsPaths(src: string): string[] {
  * for \ref-like commands, files for \input, \includegraphics and the like). ↑/↓ choose, Enter inserts the key and closes the
  * brace, Tab inserts it followed by ", " for another key, Esc dismisses.
  */
-function attachCompletion(ta: HTMLTextAreaElement, onAccept?: (mode: 'enter' | 'tab') => void): () => void {
+function attachCompletion(ta: HTMLTextAreaElement, onAccept?: (mode: 'enter' | 'tab') => void, opts: { textMode?: boolean } = {}): () => void {
   const list = document.createElement('div');
   list.className = 'complete';
   list.style.display = 'none';
@@ -1696,15 +1725,21 @@ function attachCompletion(ta: HTMLTextAreaElement, onAccept?: (mode: 'enter' | '
     const empty =
       cc.kind === 'cite'
         ? ctx?.bib.size || ctx?.bibitemText.size ? 'No matching bibliography entries' : 'No bibliography found (\\bibliography{…} or \\addbibresource{…})'
-        : cc.kind === 'file' ? (loading ? 'Looking for files…' : 'No matching files in this folder') : 'No matching labels';
+        : cc.kind === 'file' ? (loading ? 'Looking for files…' : 'No matching files in this folder')
+        : cc.kind === 'command' ? 'No matching commands' : cc.kind === 'env' ? 'No matching environments' : 'No matching labels';
+    const c = ctx ?? buildContext(text, host);
+    const label = (it: CompletionItem) =>
+      cc!.kind === 'command' ? `\\${(it.snippet ?? it.key).replace('$', '')}` : cc!.kind === 'env' && it.snippet ? it.snippet.replace('}', '} ') : it.key;
+    const preview = (it: CompletionItem) =>
+      it.math ? renderKatex(it.preview ?? `\\${it.key}`, false, c) : it.preview ? renderInline(it.preview, c) : '';
     list.innerHTML = items.length
       ? items
-          .map(
-            (it, k) =>
-              `<div class="cmp${k === active ? ' active' : ''}" data-k="${k}"><div class="cmp-main"><b>${esc(it.key)}</b> <span>${esc(it.detail)}</span></div>${
-                it.info ? `<div class="cmp-info">${esc(it.info)}</div>` : ''
-              }</div>`,
-          )
+          .map((it, k) => {
+            const pv = cc!.kind === 'command' ? preview(it) : '';
+            return `<div class="cmp${k === active ? ' active' : ''}" data-k="${k}"><div class="cmp-main"><b>${esc(label(it))}</b>${pv ? ` <span class="cmp-prev">${pv}</span>` : ''} <span>${esc(it.detail)}</span></div>${
+              it.info ? `<div class="cmp-info">${esc(it.info)}</div>` : ''
+            }</div>`;
+          })
           .join('') + `<div class="cmp-hint">${hint}</div>`
       : `<div class="cmp empty">${empty}</div>`;
     list.querySelector('.cmp.active')?.scrollIntoView({ block: 'nearest' });
@@ -1722,6 +1757,12 @@ function attachCompletion(ta: HTMLTextAreaElement, onAccept?: (mode: 'enter' | '
       const files = documentFiles(() => list.isConnected && document.activeElement === ta && update());
       loading = !files;
       source = fileItems(files ?? [], cc.command, graphicsPaths(c.text));
+    } else if (cc.kind === 'command') {
+      source = commandItems(c);
+      // In math, math commands come first.
+      if (inMath(ta.value, cc.from - 1)) source = source.map((it) => (it.math ? { ...it, rank: it.rank - 5000 } : it));
+    } else if (cc.kind === 'env') {
+      source = environmentItems();
     } else source = cc.kind === 'cite' ? citationItems(c) : labelItems(c);
     items = filterCompletions(source, cc.query, cc.kind === 'file' ? 10 : 8);
     active = 0;
@@ -1744,6 +1785,14 @@ function attachCompletion(ta: HTMLTextAreaElement, onAccept?: (mode: 'enter' | '
       to += 2;
     }
     const after = ta.value.slice(to);
+    if (cc.kind === 'command' || cc.kind === 'env') {
+      const caret = cc.kind === 'command' ? insertCommand(it, from, to) : insertEnvironment(it, cc.command, from, to);
+      ta.setSelectionRange(caret.at, caret.at);
+      hide();
+      ta.dispatchEvent(new Event('input'));
+      if (caret.done) onAccept?.(mode);
+      return;
+    }
     let ins: string;
     if (mode === 'tab' && cc.kind === 'cite') {
       // Insert the key and a separator, ready for the next key.
@@ -1759,10 +1808,49 @@ function attachCompletion(ta: HTMLTextAreaElement, onAccept?: (mode: 'enter' | '
     onAccept?.(mode);
   };
 
+  /** Math symbols typed into running text are wrapped in $…$. */
+  const wrapsInMath = (it: CompletionItem, from: number) => !!it.math && !!opts.textMode && !inMath(ta.value, from - 1);
+  /** Writes a command (its name, after the backslash at from - 1). `done`: nothing left to fill in. */
+  const insertCommand = (it: CompletionItem, from: number, to: number): { at: number; done: boolean } => {
+    const snip = it.snippet ?? it.key;
+    const hole = snip.indexOf('$');
+    const body = snip.replace('$', '');
+    if (wrapsInMath(it, from)) {
+      ta.setRangeText(`$\\${body}$`, from - 1, to, 'end');
+      return hole === -1 ? { at: from + body.length + 2, done: true } : { at: from + 1 + hole, done: false };
+    }
+    ta.setRangeText(body, from, to, 'end');
+    return hole === -1 ? { at: from + body.length, done: true } : { at: from + hole, done: false };
+  };
+  /** Writes an environment name; after \begin{ it also adds arguments and the matching \end. */
+  const insertEnvironment = (it: CompletionItem, command: string, from: number, to: number): { at: number; done: boolean } => {
+    if (ta.value[to] === '}') to++;
+    let ins = `${it.key}}`;
+    let at = from + ins.length;
+    if (command === 'begin') {
+      ins += it.snippet ? it.snippet.slice(it.key.length + 1) : '';
+      at = from + ins.length;
+      if (!ta.value.slice(to).includes(`\\end{${it.key}}`)) {
+        const lineStart = ta.value.lastIndexOf('\n', from - 1) + 1;
+        const indent = /^[ \t]*/.exec(ta.value.slice(lineStart))![0];
+        at = from + ins.length + 3 + indent.length;
+        ins += `\n${indent}  \n${indent}\\end{${it.key}}`;
+      }
+    }
+    ta.setRangeText(ins, from, to, 'end');
+    return { at, done: false };
+  };
+
   ta.addEventListener(
     'keydown',
     (e) => {
       if (list.style.display === 'none' || !cc) return;
+      // Enter after a complete command name (\item, \beta in math) keeps its usual meaning.
+      const exact = items[active];
+      if (e.key === 'Enter' && cc.kind === 'command' && exact && exact.key === cc.query && !exact.snippet && !wrapsInMath(exact, cc.from)) {
+        hide();
+        return;
+      }
       const stop = () => {
         e.preventDefault();
         e.stopImmediatePropagation();

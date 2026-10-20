@@ -474,12 +474,14 @@ body.paper .popover textarea { background: #fafafa; color: #1a1a1a; }
 body.paper .complete { background: #fff; color: #1a1a1a; }
 .cmp { padding: 4px 8px; cursor: pointer; }
 .cmp-main { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cmp-main span { color: var(--muted); margin-left: 4px; }
+.cmp-main > span { color: var(--muted); margin-left: 4px; }
+.cmp-main > .cmp-prev { color: inherit; font-family: var(--serif); font-size: 14px; }
+.cmp-main .cmp-prev .katex { font-size: 1em; }
 .cmp-info { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cmp.active { background: var(--vscode-editorSuggestWidget-selectedBackground, var(--vscode-list-activeSelectionBackground, rgba(37, 99, 235, 0.15))); color: var(--vscode-editorSuggestWidget-selectedForeground, inherit); }
 body.paper .cmp.active { background: rgba(37, 99, 235, 0.12); color: inherit; }
 /* On the highlighted row, secondary text follows the row's foreground (grey on blue is unreadable). */
-.cmp.active .cmp-main span, .cmp.active .cmp-info { color: inherit; opacity: 0.85; }
+.cmp.active .cmp-main > span:not(.cmp-prev), .cmp.active .cmp-info { color: inherit; opacity: 0.85; }
 .cmp.empty { color: var(--muted); cursor: default; }
 .cmp-hint { font-size: 10px; color: var(--muted); padding: 3px 8px; border-top: 1px solid var(--border); }
 

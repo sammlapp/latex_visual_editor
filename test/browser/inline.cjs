@@ -435,6 +435,71 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   assert.ok(/\\begin\{table\}\[htbp\]\n  \\centering\n  \\begin\{tabular\}\{lrcc\}/.test(doc) && !doc.includes('\\begin{longtable}'), '15 back to a float');
   await consistent('after table float again');
 
+  // 16. Command completion: in running text (the \\ box) and in a source editor.
+  await sync();
+  await caretAfter('Specixyzal');
+  await pg.keyboard.type('\\');
+  await pg.waitForSelector('.popover textarea');
+  await pg.keyboard.type('bet');
+  await pg.waitForFunction(() => document.querySelector('.complete .cmp.active b')?.textContent === '\\beta');
+  assert.ok(await pg.$('.complete .cmp.active .cmp-prev .katex'), '16 math symbols show a preview');
+  await pg.keyboard.press('Enter');
+  await sync();
+  assert.ok(doc.includes('Specixyzal$\\beta$'), '16 math symbol wrapped in $ in text: ' + JSON.stringify(doc.slice(doc.indexOf('Specixyzal'), doc.indexOf('Specixyzal') + 30)));
+  await caretAfter('Specixyzal');
+  await pg.keyboard.type('\\');
+  await pg.waitForSelector('.popover textarea');
+  await pg.keyboard.type('textb');
+  await pg.waitForFunction(() => document.querySelector('.complete .cmp.active b')?.textContent === '\\textbf{}');
+  await pg.keyboard.press('Enter');
+  assert.deepEqual(await pg.$eval('.popover textarea', (t) => [t.value, t.selectionStart]), ['\\textbf{}', 8], '16 caret inside the braces');
+  await pg.keyboard.type('bold');
+  await pg.keyboard.press('Enter');
+  await sync();
+  assert.ok(doc.includes('Specixyzal\\textbf{bold}$\\beta$'), '16 command with argument');
+  await consistent('after command completion');
+  // Source editor: environments get their \\end, and Enter after \\item is a newline.
+  const para = await pg.evaluate(() => { const el = [...document.querySelectorAll('.blk-paragraph')].find((e) => e.textContent.includes('Specixyzal')); el.scrollIntoView({ block: 'center' }); const r = el.getBoundingClientRect(); return { x: r.left + 30, y: r.top + 8 }; });
+  await pg.mouse.move(para.x, para.y);
+  await pg.waitForSelector('#gutter', { visible: true });
+  await pg.click('#gutter');
+  await pg.waitForSelector('.editor textarea');
+  await pg.evaluate(() => { const t = document.querySelector('.editor textarea'); t.setSelectionRange(t.value.length, t.value.length); });
+  await pg.keyboard.press('Enter');
+  await pg.keyboard.type('\\begin{ite');
+  await pg.waitForFunction(() => document.querySelector('.complete .cmp.active b')?.textContent === 'itemize');
+  await pg.keyboard.press('Enter');
+  await pg.keyboard.type('\\item');
+  await pg.waitForFunction(() => document.querySelector('.complete .cmp.active b')?.textContent === '\\item');
+  await pg.keyboard.press('Enter');
+  await pg.keyboard.type('Point');
+  const val = await pg.$eval('.editor textarea', (t) => t.value);
+  assert.ok(val.endsWith('\n\\begin{itemize}\n  \\item\nPoint\n\\end{itemize}'), '16 environment completed: ' + JSON.stringify(val.slice(-60)));
+  await pg.keyboard.press('Escape');
+  await sync();
+  assert.ok(doc.includes('\\begin{itemize}\n  \\item\nPoint\n\\end{itemize}'), '16 saved');
+  await consistent('after source editor completion');
+
+  // 17. The \\ box opens just below the caret, also in an empty paragraph or an empty table cell.
+  for (const where of ['paragraph', 'cell']) {
+    if (where === 'paragraph') {
+      await caretAfter('Specixyzal');
+      await pg.evaluate(() => { const p = getSelection().focusNode.parentElement.closest('.ed'); const r = document.createRange(); r.selectNodeContents(p); r.collapse(false); const s = getSelection(); s.removeAllRanges(); s.addRange(r); });
+      await pg.keyboard.press('Enter');
+    } else {
+      await pg.evaluate(() => { const ed = [...document.querySelectorAll('.ed[data-region="cell"]')].find((e) => e.dataset.s === e.dataset.e); ed.scrollIntoView({ block: 'center' }); const r = document.createRange(); r.setStart(ed, 0); document.getElementById('doc').focus(); const s = getSelection(); s.removeAllRanges(); s.addRange(r); });
+    }
+    const target = await pg.evaluate(() => getSelection().focusNode.closest?.('.ed')?.getBoundingClientRect().bottom ?? getSelection().focusNode.parentElement.closest('.ed').getBoundingClientRect().bottom);
+    await pg.keyboard.type('\\');
+    await pg.waitForSelector('.popover');
+    const top = await pg.$eval('.popover', (p) => p.getBoundingClientRect().top);
+    assert.ok(top > target - 30 && top < target + 30, `17 box below the empty ${where}: box ${Math.round(top)}, ${where} bottom ${Math.round(target)}`);
+    await pg.keyboard.press('Escape');
+    await sleep(100);
+  }
+  await sync();
+  await consistent('after empty-region boxes');
+
   console.log(errs.length ? 'PAGE ERRORS:\n' + errs.join('\n') : 'no page errors');
   console.log('ALL INLINE CHECKS PASSED');
   await b.close();

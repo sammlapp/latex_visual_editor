@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Command and symbol completion after `\` (with math previews and the document's own macros), and environment
+  completion after `\begin{` that adds the matching `\end`.
+
 - Delete any block with the × at its upper right on hover (with an Undo notice).
 - Cmd/Ctrl+F opens VS Code's find widget in the visual editor.
 - `\input` / `\include` files render inline, read-only, with an **Open ↗** button (or double-click) to

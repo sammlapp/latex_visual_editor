@@ -58,6 +58,13 @@ whole words across keys, author names and title words, so `lapp opensoundscape`
 finds *Lapp et al. (2023), "OpenSoundscape: …"*. Enter inserts the key, Tab adds
 another. `\ref{` / **→ Ref** completes labels the same way.
 
+**Commands and symbols.** After `\` (in text or in any source editor), matching
+LaTeX commands are suggested as you type — `\bet` offers `\beta` — with a preview
+of math symbols. Matching also uses descriptions (`\arrow` finds `\rightarrow`), and
+your own `\newcommand`s are included. Commands with arguments put the cursor
+inside the braces; math symbols picked in running text are wrapped in `$…$`. After
+`\begin{`, environments are suggested and the matching `\end{…}` is added.
+
 **File paths.** Inside `\input{`, `\include{`, `\includegraphics{`, `\bibliography{`,
 `\addbibresource{` and `\lstinputlisting{`, the files in the document's folder
 are suggested, filtered to the right kind (`.tex`, images, `.bib`…). Paths are

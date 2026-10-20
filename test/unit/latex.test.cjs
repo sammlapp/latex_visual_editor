@@ -399,3 +399,36 @@ test('table model: parse, edit and write back tabular environments', () => {
   assert.equal(src.slice(0, pk.start) + pk.text + src.slice(pk.end), src.replace('\\usepackage{amsmath}', '\\usepackage{amsmath}\n\\usepackage{booktabs}'));
   assert.deepEqual(L.parseTsv('a\tb\n"multi\nline"\t"say ""hi"""\n'), [['a', 'b'], ['multi line', 'say "hi"']]);
 });
+
+test('command and environment completion', () => {
+  const at = (s) => L.completionAt(s.replace('|', ''), s.indexOf('|') === -1 ? s.length : s.indexOf('|'));
+  let c = at('see \\bet');
+  assert.deepEqual([c.kind, c.query, c.from, c.to], ['command', 'bet', 5, 8]);
+  c = at('\\tex|tbf{x}');
+  assert.deepEqual([c.query, c.to], ['tex', 7], 'replaces the whole name');
+  assert.equal(at('\\').query, '');
+  assert.equal(at('a\\\\'), null, '\\\\ is a line break, not a command');
+  assert.equal(at('\\beta x'), null);
+  c = at('\\begin{eq');
+  assert.deepEqual([c.kind, c.command, c.query], ['env', 'begin', 'eq']);
+  assert.equal(at('\\cite{kn').kind, 'cite', 'keys still complete inside \\cite{');
+
+  const doc = '\\documentclass{article}\n\\newcommand{\\R}{\\mathbb{R}}\n\\newcommand{\\note}[1]{\\textbf{#1}}\n\\DeclareMathOperator{\\argmax}{arg\\,max}\n\\begin{document}\nx\n\\end{document}';
+  const items = L.commandItems(L.buildContext(doc, { bib: '', images: {} }));
+  const keys = (q, n = 3) => L.filterCompletions(items, q, n).map((i) => i.key);
+  assert.equal(keys('bet')[0], 'beta');
+  assert.equal(keys('textb')[0], 'textbf');
+  assert.ok(keys('arrow', 8).includes('rightarrow'), 'matches descriptions too');
+  assert.equal(keys('in')[0], 'in', 'exact name first');
+  assert.deepEqual(keys('note', 1), ['note'], "the document's own macros");
+  const note = items.find((i) => i.key === 'note');
+  assert.equal(note.snippet, 'note{$}');
+  assert.equal(items.find((i) => i.key === 'argmax').math, true);
+  assert.equal(items.find((i) => i.key === 'frac').snippet, 'frac{$}{}');
+  assert.equal(L.filterCompletions(L.environmentItems(), 'ite')[0].key, 'itemize');
+
+  assert.equal(L.inMath('a $x + ', 7), true);
+  assert.equal(L.inMath('a $x$ b', 7), false);
+  assert.equal(L.inMath('\\(x', 3), true);
+  assert.equal(L.inMath('\\$5', 3), false, 'escaped dollar');
+});
