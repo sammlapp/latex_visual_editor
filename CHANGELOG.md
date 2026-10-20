@@ -1,12 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-10-20
 
 - Empty paragraphs: `\` or `</>` opens the LaTeX editor for a new block, and pasted LaTeX code stays LaTeX.
-
 - Command and symbol completion after `\` (with math previews and the document's own macros), and environment
   completion after `\begin{` that adds the matching `\end`.
-
 - Delete any block with the × at its upper right on hover (with an Undo notice).
 - Cmd/Ctrl+F opens VS Code's find widget in the visual editor.
 - `\input` / `\include` files render inline, read-only, with an **Open ↗** button (or double-click) to
@@ -23,6 +21,12 @@
 - Problems reported by language servers — LTeX spelling and grammar checks, Code Spell Checker — are
   underlined in the visual editor. Hover an underline for the message and the server's quick fixes
   (replacements, add to dictionary, …). Configure with `latexVisual.diagnostics.*`.
+
+Fixes:
+
+- Paste and cut now edit the LaTeX source (VS Code's paste could show text that then disappeared).
+- Clicking anywhere in a table puts the cursor in the nearest cell instead of opening the LaTeX source.
+- The `\` box opens at the cursor in empty paragraphs and cells (it appeared at the top of the window).
 
 ## 0.1.0 — preview
 

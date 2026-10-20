@@ -2,7 +2,7 @@
   "name": "swan-latex-visual-editor",
   "displayName": "Swan LaTeX Visual Editor",
   "description": "Edit LaTeX documents visually: text, equations, tables, figures and cross-references render inline; click any block to edit its source with a live preview.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "preview": true,
   "publisher": "sammlapp",
   "license": "MIT",
@@ -117,7 +117,7 @@
             "paper"
           ],
           "default": "theme",
-          "description": "Initial page style: follow the VS Code color theme, or render on a white paper sheet. Toggle per editor with the \u25d0 Paper button."
+          "description": "Initial page style: follow the VS Code color theme, or render on a white paper sheet. Toggle per editor with the ◐ Paper button."
         },
         "latexVisual.diagnostics.enabled": {
           "type": "boolean",
