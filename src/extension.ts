@@ -532,7 +532,8 @@ export function activate(context: vscode.ExtensionContext) {
   const provider = new LatexVisualEditorProvider(context);
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(VIEW_TYPE, provider, {
-      webviewOptions: { retainContextWhenHidden: true },
+      // enableFindWidget: VS Code's own Cmd/Ctrl+F find bar, searching the rendered text.
+      webviewOptions: { retainContextWhenHidden: true, enableFindWidget: true },
       supportsMultipleEditorsPerDocument: true,
     }),
     vscode.commands.registerCommand('latexVisual.open', (uri?: vscode.Uri) => openVisual(uri, false)),

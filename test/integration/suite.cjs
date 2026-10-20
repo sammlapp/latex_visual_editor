@@ -41,6 +41,11 @@ exports.run = async function () {
     assert.equal(tab.input.viewType, 'latexVisual.editor');
   });
 
+  await check('Cmd/Ctrl+F opens VS Code\'s find widget', async () => {
+    assert.equal(session.panel.options.enableFindWidget, true);
+    await vscode.commands.executeCommand('editor.action.webvieweditor.showFind');
+  });
+
   await check('renders all block kinds without errors', async () => {
     const s = session.lastStats;
     for (const k of ['heading', 'paragraph', 'math', 'figure', 'table', 'list', 'env', 'command', 'preamble']) assert.ok(s.kinds[k] > 0, `missing ${k}: ${JSON.stringify(s.kinds)}`);

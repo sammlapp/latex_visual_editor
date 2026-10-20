@@ -16,19 +16,22 @@ Problems panel navigation: clicking an item in the Problems panel should go to t
 
 
 
-Cmd+F not availabile for search
 
-Probably fixed (please confirm): VS Code pastes/cuts in the visual editor with execCommand, which fired no beforeinput, so pasted text only changed the page and never the .tex source (and was lost on the next re-render); paste and cut events are now handled. Original report: buggy cut/ pasting behavior: after pasting text into a block, something goes wrong; exiting the block results in the pasted text being lost; the positioning of the cursor becomes wonky and sometimes jumps to a previous position;  paste shows the text, but then spacebar removes the pasted text, even if I change the cursor position to ensure nothing is highlighted.  
+  
 
 Can't copy/cut content from multiple chunks. Enable shift+click across sections to select multiple sections, with copy/cut enabled
 
-Triple-click to select entire paragraph -> cannot backspace; similarly, cmd+A doesn't select entire chunk (no effect)
+cmd+A should select entire chunk (currently no effect)
 
 when a cell is empty, I can't open the raw latex editor. Thus I can't eg paste latex code or start typing latex code to insert a figure
 
 Typing a space before an existing space glues the next typed word onto the following word: with the cursor after "Special" in "Special relativity", typing " th" gives "Special  threlativity" (rendered "Special threlativity") instead of "Special th relativity". The source now has two spaces, which render as one; the cursor position after that rendered space maps to the end of both source spaces, so the following characters land at the start of the next word. Cause: runIndexToSource in src/webview/main.ts snaps to the end of a collapsed whitespace run.
 
 # Completed
+
+Completed: Cmd+F not availabile for search. Uses VS Code's own find widget (Cmd/Ctrl+F, Enter / Shift+Enter for next/previous) over the rendered text. Not done: find-and-replace.
+
+Completed: VS Code pastes/cuts in the visual editor with execCommand, which fired no beforeinput, so pasted text only changed the page and never the .tex source (and was lost on the next re-render); paste and cut events are now handled. Original report: buggy cut/ pasting behavior: after pasting text into a block, something goes wrong; exiting the block results in the pasted text being lost; the positioning of the cursor becomes wonky and sometimes jumps to a previous position;  paste shows the text, but then spacebar removes the pasted text, even if I change the cursor position to ensure nothing is highlighted.
 
 Completed: Table editing: tables are edited in a tabular layout, similar to google sheets, and content can be pasted from excel/google sheets. Enable booktabs by default. Basic formatting like inserting horizontal line-rules and merging/unmerging cells is supported. Columns text alignment and resizing with text wrapping. Table-level controls for size/spacing of elelements. Check-box for longtable  to allow split across tables. Done: table bar while the cursor is in a cell (rows/columns, alignment, Wrap + drag column edges, lines above/below, merge/split, booktabs and long checkboxes, font size / row spacing / column padding); Tab, Shift+Tab, Enter navigation; paste from Excel/Sheets; new tables use booktabs; packages added automatically. Not done: vertical merges (\multirow); size/spacing controls for longtables.
 

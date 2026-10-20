@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Cmd/Ctrl+F opens VS Code's find widget in the visual editor.
 - `\input` / `\include` files render inline, read-only, with an **Open ↗** button (or double-click) to
   edit them. Section, equation, figure and citation numbering continues across files, `\ref`s into
   included files resolve, and the view updates live as the included file changes.

@@ -50,6 +50,7 @@ are escaped for you.
 | Inline math | type `$` (or ⌘/Ctrl+M) |
 | Any LaTeX command | type `\` |
 | Undo / redo | ⌘/Ctrl+Z, ⇧⌘Z / Ctrl+Y (VS Code's normal history) |
+| Find | ⌘/Ctrl+F (VS Code's find widget, searching the rendered text) |
 
 **Citations and references.** Type `\cite{` (or `\citep{`, `\citet{`, …) or
 click **❝ Cite**, and your bibliography appears as you type. Matching is by
